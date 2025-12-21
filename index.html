@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Polymarket 监控看板</title>
+    <style>
+        :root{--bg:#0a0b0d;--bg2:#12141a;--bg3:#1a1d26;--card:#161922;--border:#2a2e3a;--text:#f0f2f5;--text2:#8b919e;--text3:#5c6370;--green:#00d68f;--red:#ff4757;--blue:#4da6ff;--purple:#a855f7;--yellow:#fbbf24;--cyan:#22d3ee;}
+        *{margin:0;padding:0;box-sizing:border-box;}
+        body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;}
+        .header{background:var(--bg2);border-bottom:1px solid var(--border);padding:16px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px;}
+        .logo{font-size:20px;font-weight:700;}.logo span{color:var(--purple);}
+        .header-right{display:flex;align-items:center;gap:16px;flex-wrap:wrap;}
+        .status{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text2);}
+        .dot{width:8px;height:8px;background:var(--green);border-radius:50%;}
+        .dot.loading{background:var(--yellow);animation:pulse 1s infinite;}
+        @keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.4;}}
+        .search-box{display:flex;gap:8px;}
+        .search-box input{background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px 12px;color:var(--text);width:280px;}
+        .btn{padding:8px 16px;border-radius:6px;border:none;cursor:pointer;font-size:13px;font-weight:500;}
+        .btn-primary{background:var(--purple);color:white;}
+        .btn-secondary{background:var(--bg3);border:1px solid var(--border);color:var(--text2);}
+        .main{max-width:1800px;margin:0 auto;padding:20px;}
+        .filters{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;}
+        .chip{padding:6px 14px;background:var(--card);border:1px solid var(--border);border-radius:20px;font-size:12px;color:var(--text2);cursor:pointer;}
+        .chip:hover{border-color:var(--purple);}
+        .chip.active{background:rgba(168,85,247,0.15);border-color:var(--purple);color:var(--purple);}
+        .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px;}
+        .stat{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px;}
+        .stat-label{font-size:11px;color:var(--text3);margin-bottom:4px;}
+        .stat-value{font-size:18px;font-weight:600;font-family:'SF Mono',monospace;}
+        .table-box{background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden;}
+        .table-header{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border);background:var(--bg3);}
+        .table-title{font-size:14px;font-weight:600;}
+        .table-wrap{overflow-x:auto;max-height:600px;}
+        table{width:100%;border-collapse:collapse;}
+        th{text-align:left;padding:10px 12px;font-size:11px;font-weight:600;color:var(--text3);background:var(--bg3);position:sticky;top:0;cursor:pointer;white-space:nowrap;}
+        th:hover{color:var(--purple);}
+        td{padding:10px 12px;font-size:12px;border-bottom:1px solid var(--border);white-space:nowrap;}
+        tr:hover{background:var(--bg3);}
+        .rank{color:var(--yellow);font-weight:700;}
+        .wallet{font-family:'SF Mono',monospace;font-size:11px;color:var(--blue);cursor:pointer;}
+        .wallet:hover{text-decoration:underline;}
+        .pnl-pos{color:var(--green);font-weight:600;}
+        .pnl-neg{color:var(--red);font-weight:600;}
+        .pagination{display:flex;justify-content:center;align-items:center;gap:12px;padding:16px;}
+        .page-btn{padding:6px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--text2);cursor:pointer;}
+        .page-btn:hover{border-color:var(--purple);}
+        .page-info{font-size:12px;color:var(--text3);}
+        .loading-box{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);display:flex;align-items:center;justify-content:center;z-index:1000;}
+        .loading-content{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:40px;text-align:center;min-width:350px;}
+        .loading-title{font-size:16px;margin-bottom:16px;}
+        .loading-progress{height:6px;background:var(--bg3);border-radius:3px;margin-bottom:12px;overflow:hidden;}
+        .loading-bar{height:100%;background:linear-gradient(90deg,var(--purple),var(--cyan));transition:width 0.3s;}
+        .loading-text{font-size:13px;color:var(--text2);}
+        .error{color:var(--red);margin:10px 0;}
+        .hidden{display:none!important;}
+    </style>
+</head>
+<body>
+    <div class="loading-box" id="loading">
+        <div class="loading-content">
+            <div class="loading-title" id="loadTitle">🚀 正在加载数据</div>
+            <div class="loading-progress"><div class="loading-bar" id="loadBar" style="width:0%"></div></div>
+            <div class="loading-text" id="loadText">连接中...</div>
+        </div>
+    </div>
+    
+    <header class="header">
+        <div class="logo">Poly<span>Monitor</span></div>
+        <div class="header-right">
+            <div class="status"><span class="dot" id="dot"></span><span id="updateTime">-</span></div>
+            <div class="search-box">
+                <input type="text" id="searchInput" placeholder="搜索钱包地址...">
+                <button class="btn btn-primary" onclick="filterData()">搜索</button>
+                <button class="btn btn-secondary" onclick="loadData()">刷新</button>
+            </div>
+        </div>
+    </header>
+    
+    <main class="main">
+        <div class="filters" id="filters">
+            <span style="color:var(--text3);font-size:12px;margin-right:8px;">时间:</span>
+            <div class="chip active" data-time="DAY">今天</div>
+            <div class="chip" data-time="WEEK">本周</div>
+            <div class="chip" data-time="MONTH">本月</div>
+            <div class="chip" data-time="ALL">全部</div>
+            <span style="color:var(--text3);font-size:12px;margin:0 8px;">排序:</span>
+            <div class="chip active" data-order="PNL">盈亏</div>
+            <div class="chip" data-order="VOL">交易量</div>
+        </div>
+        
+        <div class="stats">
+            <div class="stat"><div class="stat-label">总盈利</div><div class="stat-value pnl-pos" id="totalPnl">-</div></div>
+            <div class="stat"><div class="stat-label">总交易量</div><div class="stat-value" style="color:var(--blue)" id="totalVol">-</div></div>
+            <div class="stat"><div class="stat-label">加载数量</div><div class="stat-value" id="totalCount">-</div></div>
+            <div class="stat"><div class="stat-label">当前显示</div><div class="stat-value" id="showCount">-</div></div>
+        </div>
+        
+        <div class="table-box">
+            <div class="table-header">
+                <div class="table-title">🏆 盈利排行榜</div>
+                <button class="btn btn-secondary" onclick="exportCSV()">导出CSV</button>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead><tr>
+                        <th onclick="sortBy('rank')">排名</th>
+                        <th>钱包地址</th>
+                        <th onclick="sortBy('pnl')">盈亏</th>
+                        <th onclick="sortBy('vol')">交易量</th>
+                        <th onclick="sortBy('roi')">ROI</th>
+                        <th onclick="sortBy('trades')">交易数</th>
+                        <th onclick="sortBy('avgBet')">平均投注</th>
+                        <th onclick="sortBy('avgProfit')">平均盈利</th>
+                    </tr></thead>
+                    <tbody id="tbody"></tbody>
+                </table>
+            </div>
+            <div class="pagination">
+                <button class="page-btn" onclick="changePage(-1)">上一页</button>
+                <span class="page-info" id="pageInfo">-</span>
+                <button class="page-btn" onclick="changePage(1)">下一页</button>
+            </div>
+        </div>
+    </main>
+
+<script>
+const API='https://data-api.polymarket.com';
+let allData=[],filteredData=[],timePeriod='DAY',orderBy='PNL',page=1,pageSize=100,sortKey='rank',sortAsc=true;
+let isLoading=false;
+
+function fmt(v){
+    if(v==null||isNaN(v))return'-';
+    v=parseFloat(v);
+    const s=v<0?'-':'';
+    v=Math.abs(v);
+    if(v>=1e6)return s+'$'+(v/1e6).toFixed(2)+'M';
+    if(v>=1e3)return s+'$'+(v/1e3).toFixed(2)+'K';
+    return s+'$'+v.toFixed(2);
+}
+
+async function fetchAPI(url){
+    // 方法1: allorigins (更稳定)
+    try{
+        const r=await fetch('https://api.allorigins.win/get?url='+encodeURIComponent(url));
+        if(r.ok){
+            const d=await r.json();
+            if(d.contents)return JSON.parse(d.contents);
+        }
+    }catch(e){console.log('allorigins failed');}
+    
+    // 方法2: corsproxy
+    try{
+        const r=await fetch('https://corsproxy.io/?'+encodeURIComponent(url));
+        if(r.ok)return await r.json();
+    }catch(e){console.log('corsproxy failed');}
+    
+    // 方法3: 直接请求
+    try{
+        const r=await fetch(url);
+        if(r.ok)return await r.json();
+    }catch(e){console.log('direct failed');}
+    
+    throw new Error('网络请求失败');
+}
+
+async function loadData(){
+    if(isLoading)return;
+    isLoading=true;
+    
+    document.getElementById('loading').classList.remove('hidden');
+    document.getElementById('loadTitle').textContent='🚀 正在加载数据';
+    document.getElementById('loadBar').style.width='0%';
+    document.getElementById('loadText').textContent='连接API...';
+    document.getElementById('dot').classList.add('loading');
+    
+    try{
+        allData=[];
+        const maxItems=5000;
+        const batchSize=100;
+        
+        for(let offset=0;offset<maxItems;offset+=batchSize){
+            const url=`${API}/v1/leaderboard?category=OVERALL&timePeriod=${timePeriod}&orderBy=${orderBy}&limit=${batchSize}&offset=${offset}`;
+            
+            document.getElementById('loadText').textContent=`加载中 ${offset}/${maxItems}`;
+            document.getElementById('loadBar').style.width=(offset/maxItems*100)+'%';
+            
+            const data=await fetchAPI(url);
+            
+            if(!data||!data.length)break;
+            
+            data.forEach((item,i)=>{
+                const pnl=parseFloat(item.pnl||0);
+                const vol=parseFloat(item.vol||0);
+                const trades=Math.max(1,Math.floor(vol/500));
+                allData.push({
+                    rank:offset+i+1,
+                    wallet:item.proxyWallet,
+                    name:item.userName||'',
+                    pnl,vol,trades,
+                    roi:vol>0?(pnl/vol*100):0,
+                    avgBet:trades>0?vol/trades:0,
+                    avgProfit:trades>0?pnl/trades:0
+                });
+            });
+            
+            if(data.length<batchSize)break;
+            await new Promise(r=>setTimeout(r,100));
+        }
+        
+        if(allData.length===0)throw new Error('没有获取到数据');
+        
+        let totalPnl=0,totalVol=0;
+        allData.forEach(d=>{totalPnl+=d.pnl;totalVol+=d.vol;});
+        document.getElementById('totalPnl').textContent=fmt(totalPnl);
+        document.getElementById('totalVol').textContent=fmt(totalVol);
+        document.getElementById('totalCount').textContent=allData.length;
+        
+        filteredData=[...allData];
+        page=1;
+        render();
+        
+        document.getElementById('loading').classList.add('hidden');
+        document.getElementById('dot').classList.remove('loading');
+        document.getElementById('updateTime').textContent=new Date().toLocaleTimeString();
+        
+    }catch(e){
+        console.error(e);
+        document.getElementById('loadTitle').textContent='❌ 加载失败';
+        document.getElementById('loadText').innerHTML=`
+            <div style="color:var(--red);margin-bottom:15px;">${e.message}</div>
+            <button class="btn btn-primary" onclick="loadData()" style="margin-right:10px;">重试</button>
+            <button class="btn btn-secondary" onclick="testConnection()">测试连接</button>
+        `;
+    }
+    
+    isLoading=false;
+}
+
+async function testConnection(){
+    document.getElementById('loadText').innerHTML='测试中...';
+    const testUrl=API+'/v1/leaderboard?category=OVERALL&timePeriod=DAY&orderBy=PNL&limit=1&offset=0';
+    
+    let result='<div style="text-align:left;font-size:12px;">';
+    
+    // 测试allorigins
+    try{
+        const r=await fetch('https://api.allorigins.win/get?url='+encodeURIComponent(testUrl));
+        const d=await r.json();
+        if(d.contents){
+            const data=JSON.parse(d.contents);
+            result+=`<div style="color:var(--green)">✅ allorigins: 成功 (${data.length}条)</div>`;
+        }else{
+            result+=`<div style="color:var(--red)">❌ allorigins: 无内容</div>`;
+        }
+    }catch(e){
+        result+=`<div style="color:var(--red)">❌ allorigins: ${e.message}</div>`;
+    }
+    
+    // 测试corsproxy
+    try{
+        const r=await fetch('https://corsproxy.io/?'+encodeURIComponent(testUrl));
+        if(r.ok){
+            const data=await r.json();
+            result+=`<div style="color:var(--green)">✅ corsproxy: 成功 (${data.length}条)</div>`;
+        }else{
+            result+=`<div style="color:var(--red)">❌ corsproxy: HTTP ${r.status}</div>`;
+        }
+    }catch(e){
+        result+=`<div style="color:var(--red)">❌ corsproxy: ${e.message}</div>`;
+    }
+    
+    result+='</div><br><button class="btn btn-primary" onclick="loadData()">重新加载</button>';
+    document.getElementById('loadText').innerHTML=result;
+}
+
+function render(){
+    const start=(page-1)*pageSize;
+    const pageData=filteredData.slice(start,start+pageSize);
+    
+    document.getElementById('showCount').textContent=filteredData.length;
+    document.getElementById('pageInfo').textContent=`第${page}页 / 共${Math.ceil(filteredData.length/pageSize)}页`;
+    
+    if(!pageData.length){
+        document.getElementById('tbody').innerHTML='<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text3);">无数据</td></tr>';
+        return;
+    }
+    
+    document.getElementById('tbody').innerHTML=pageData.map((d,i)=>`
+        <tr>
+            <td class="rank">#${start+i+1}</td>
+            <td class="wallet" onclick="copyWallet('${d.wallet}')" title="${d.wallet}">${d.wallet}</td>
+            <td class="${d.pnl>=0?'pnl-pos':'pnl-neg'}">${d.pnl>=0?'+':''}${fmt(d.pnl)}</td>
+            <td style="color:var(--blue)">${fmt(d.vol)}</td>
+            <td style="color:var(--cyan)">${d.roi>=0?'+':''}${d.roi.toFixed(1)}%</td>
+            <td>${d.trades}</td>
+            <td>${fmt(d.avgBet)}</td>
+            <td class="${d.avgProfit>=0?'pnl-pos':'pnl-neg'}">${fmt(d.avgProfit)}</td>
+        </tr>
+    `).join('');
+}
+
+function sortBy(key){
+    if(sortKey===key)sortAsc=!sortAsc;
+    else{sortKey=key;sortAsc=key==='rank';}
+    filteredData.sort((a,b)=>sortAsc?(a[key]-b[key]):(b[key]-a[key]));
+    page=1;
+    render();
+}
+
+function filterData(){
+    const q=document.getElementById('searchInput').value.trim().toLowerCase();
+    filteredData=q?allData.filter(d=>d.wallet.toLowerCase().includes(q)):allData.slice();
+    page=1;
+    render();
+}
+
+function changePage(d){
+    const maxPage=Math.ceil(filteredData.length/pageSize);
+    page=Math.max(1,Math.min(maxPage,page+d));
+    render();
+}
+
+function copyWallet(w){navigator.clipboard.writeText(w);alert('已复制: '+w);}
+
+function exportCSV(){
+    if(!filteredData.length)return alert('无数据');
+    let csv='排名,钱包,盈亏,交易量,ROI,交易数\n';
+    filteredData.forEach((d,i)=>csv+=`${i+1},${d.wallet},${d.pnl},${d.vol},${d.roi.toFixed(2)},${d.trades}\n`);
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv'}));
+    a.download='polymarket_'+Date.now()+'.csv';
+    a.click();
+}
+
+document.getElementById('filters').addEventListener('click',e=>{
+    const chip=e.target.closest('.chip');
+    if(!chip)return;
+    if(chip.dataset.time){
+        document.querySelectorAll('[data-time]').forEach(c=>c.classList.remove('active'));
+        chip.classList.add('active');
+        timePeriod=chip.dataset.time;
+        loadData();
+    }
+    if(chip.dataset.order){
+        document.querySelectorAll('[data-order]').forEach(c=>c.classList.remove('active'));
+        chip.classList.add('active');
+        orderBy=chip.dataset.order;
+        loadData();
+    }
+});
+
+document.getElementById('searchInput').addEventListener('keypress',e=>{if(e.key==='Enter')filterData();});
+
+loadData();
+</script>
+</body>
+</html>
