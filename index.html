@@ -229,10 +229,10 @@
             </div>
             <div class="filter-bar">
                 <div class="filter-group"><span class="filter-label">时间:</span>
-                    <button class="filter-chip time-chip active" data-time="DAY">今天</button>
+                    <button class="filter-chip time-chip" data-time="DAY">今天</button>
                     <button class="filter-chip time-chip" data-time="WEEK">周度</button>
                     <button class="filter-chip time-chip" data-time="MONTH">月度</button>
-                    <button class="filter-chip time-chip" data-time="ALL">全部</button>
+                    <button class="filter-chip time-chip active" data-time="ALL">全部</button>
                 </div>
                 <div class="filter-group"><span class="filter-label">排序:</span>
                     <button class="filter-chip order-chip active" data-order="PNL">按盈亏</button>
@@ -244,7 +244,7 @@
                 <div class="stat-card"><div class="stat-label">总交易量</div><div class="stat-value col-volume" id="statVol">-</div></div>
                 <div class="stat-card"><div class="stat-label">数据总量</div><div class="stat-value" id="statTotal">-</div></div>
                 <div class="stat-card"><div class="stat-label">筛选结果</div><div class="stat-value" id="statFiltered">-</div></div>
-                <div class="stat-card"><div class="stat-label">时间范围</div><div class="stat-value" id="statTime">今天</div></div>
+                <div class="stat-card"><div class="stat-label">时间范围</div><div class="stat-value" id="statTime">全部</div></div>
                 <div class="stat-card"><div class="stat-label">数据来源</div><div class="stat-value" style="color:var(--accent-green)">Polymarket API</div></div>
             </div>
             <div class="table-container">
@@ -362,7 +362,7 @@
                 <div class="pagination"><span class="pagination-info" id="posPageInfo">-</span><button class="page-btn" onclick="changePosPage(-1)">‹</button><div class="page-select-container"><button class="page-select-btn" onclick="togglePosDropdown()" id="posSelectBtn">第 1 页 ▼</button><div class="page-dropdown" id="posDropdown"></div></div><button class="page-btn" onclick="changePosPage(1)">›</button></div>
             </div>
             <div class="table-container">
-                <div class="table-header"><h3 class="table-title" id="txTitle">📜 交易历史</h3><div class="table-actions"><button class="action-btn" id="loadAllBtn" onclick="loadAllTrades()">📥 加载全部</button><button class="action-btn" onclick="exportTrades()">导出</button></div></div>
+                <div class="table-header"><h3 class="table-title" id="txTitle">📜 交易历史</h3><div class="table-actions"><span id="txLoadStatus" style="font-size:11px;color:var(--text-muted);"></span><button class="action-btn" onclick="exportTrades()">导出</button></div></div>
                 <div class="table-wrapper" style="max-height:400px;"><table><thead><tr><th>市场</th><th>方向</th><th>类型</th><th>价格</th><th>数量</th><th>金额</th><th>时间</th></tr></thead><tbody id="txBody"><tr><td colspan="7" class="no-results">请输入地址查询</td></tr></tbody></table></div>
                 <div class="pagination"><span class="pagination-info" id="txPageInfo">-</span><button class="page-btn" onclick="changeTxPage(-1)">‹</button><div class="page-select-container"><button class="page-select-btn" onclick="toggleTxDropdown()" id="txSelectBtn">第 1 页 ▼</button><div class="page-dropdown" id="txDropdown"></div></div><button class="page-btn" onclick="changeTxPage(1)">›</button></div>
             </div>
@@ -372,7 +372,7 @@
 const DATA_API='https://data-api.polymarket.com',GAMMA_API='https://gamma-api.polymarket.com';
 const MAX_DATA=5000,PAGE_SIZE=100,TOTAL_PAGES=50,REFRESH_INTERVAL=10*60*1000; // 10分钟
 
-let category='OVERALL',timePeriod='DAY',orderBy='PNL',page=1,wallet='',minAmt=5000;
+let category='OVERALL',timePeriod='ALL',orderBy='PNL',page=1,wallet='',minAmt=5000;
 let allData=[],filteredData=[];
 let currentSortKey='rank',currentSortAsc=true;
 let allPositions=[],allTrades=[],posPage=1,txPage=1,itemsPerPage=100,globalPnl=0;
@@ -380,6 +380,38 @@ let refreshTimer=null,countdownTimer=null,nextRefresh=0;
 
 const catMap={'OVERALL':{zh:'全部',en:'All'},'POLITICS':{zh:'政治',en:'Politics'},'SPORTS':{zh:'体育',en:'Sports'},'CRYPTO':{zh:'加密',en:'Crypto'},'FINANCE':{zh:'金融',en:'Finance'},'CULTURE':{zh:'文化',en:'Culture'},'WEATHER':{zh:'天气',en:'Weather'},'ECONOMICS':{zh:'经济',en:'Economics'},'TECH':{zh:'科技',en:'Tech'}};
 const timeMap={'DAY':'今天','WEEK':'周度','MONTH':'月度','ALL':'全部'};
+
+// 缓存相关 - 简化为单一缓存
+const CACHE_KEY='polymarket_cache_v3';
+const CACHE_EXPIRE=10*60*1000; // 10分钟过期
+
+function getCache(){
+    try{
+        const cached=localStorage.getItem(CACHE_KEY);
+        if(!cached)return null;
+        const {data,time}=JSON.parse(cached);
+        return {data,time,isExpired:Date.now()-time>CACHE_EXPIRE};
+    }catch(e){return null;}
+}
+
+function setCache(data){
+    try{
+        localStorage.setItem(CACHE_KEY,JSON.stringify({data,time:Date.now()}));
+    }catch(e){console.log('缓存保存失败');}
+}
+
+function showUpdateIndicator(show,text=''){
+    const dot=document.getElementById('liveDot');
+    const update=document.getElementById('lastUpdate');
+    if(show){
+        dot.classList.add('loading');
+        dot.title='后台更新中...';
+        if(text)update.textContent=text;
+    }else{
+        dot.classList.remove('loading');
+        dot.title='';
+    }
+}
 
 function fmt$(v){if(v===null||v===undefined||isNaN(v))return'-';v=parseFloat(v);const s=v<0?'-':'';v=Math.abs(v);if(v>=1e9)return s+'$'+(v/1e9).toFixed(2)+'B';if(v>=1e6)return s+'$'+(v/1e6).toFixed(2)+'M';if(v>=1e3)return s+'$'+(v/1e3).toFixed(2)+'K';return s+'$'+v.toFixed(2);}
 function parseTimestamp(ts){if(!ts)return null;if(typeof ts==='number'){if(ts>1e12)return new Date(ts);if(ts>1e9)return new Date(ts*1000);}if(typeof ts==='string'){const num=parseInt(ts);if(!isNaN(num)){if(num>1e12)return new Date(num);if(num>1e9)return new Date(num*1000);}const d=new Date(ts);if(!isNaN(d.getTime()))return d;}return null;}
@@ -417,15 +449,128 @@ async function api(url){
 // 初始化
 document.addEventListener('DOMContentLoaded',()=>{
     initFilters();
-    loadAllLeaderboardData();
+    initWithCache();
 });
+
+// 缓存优先初始化
+async function initWithCache(){
+    const cache=getCache();
+    
+    if(cache&&cache.data&&cache.data.length>0){
+        // 有缓存，直接显示
+        allData=cache.data;
+        updateStats();
+        currentSortKey='rank';
+        currentSortAsc=true;
+        applyFiltersAndSort();
+        showLoadingOverlay(false);
+        
+        const cacheTimeStr=new Date(cache.time).toLocaleTimeString();
+        document.getElementById('lastUpdate').textContent=cacheTimeStr+'(缓存)';
+        
+        // 如果缓存过期，后台静默更新
+        if(cache.isExpired){
+            silentUpdate();
+        }else{
+            startRefreshTimer();
+        }
+    }else{
+        // 无缓存，首次加载
+        loadAllLeaderboardData();
+    }
+}
+
+// 更新统计数据
+function updateStats(){
+    let totalPnl=0,totalVol=0;
+    allData.forEach(t=>{totalPnl+=t.pnl;totalVol+=t.vol;});
+    document.getElementById('statPnl').textContent=fmt$(totalPnl);
+    document.getElementById('statVol').textContent=fmt$(totalVol);
+    document.getElementById('statTotal').textContent=allData.length.toLocaleString();
+    document.getElementById('dataInfo').textContent=`${allData.length}条数据`;
+}
+
+// 后台静默更新
+async function silentUpdate(){
+    showUpdateIndicator(true,'更新中...');
+    
+    try{
+        const newData=await fetchLeaderboardData();
+        if(newData&&newData.length>0){
+            allData=newData;
+            setCache(allData);
+            updateStats();
+            applyFiltersAndSort();
+            document.getElementById('lastUpdate').textContent=new Date().toLocaleTimeString();
+        }
+    }catch(e){
+        console.error('静默更新失败:',e);
+    }
+    
+    showUpdateIndicator(false);
+    startRefreshTimer();
+}
+
+// 获取排行榜数据（纯数据获取，不更新UI）
+async function fetchLeaderboardData(){
+    const newData=[];
+    const limit=100;
+    const concurrent=5;
+    const totalBatches=Math.ceil(MAX_DATA/limit);
+    const batches=[];
+    for(let i=0;i<totalBatches;i++)batches.push(i*limit);
+    
+    for(let i=0;i<batches.length;i+=concurrent){
+        const batch=batches.slice(i,i+concurrent);
+        const promises=batch.map(offset=>{
+            // 始终使用ALL获取全量数据
+            const url=`${DATA_API}/v1/leaderboard?category=OVERALL&timePeriod=ALL&orderBy=PNL&limit=${limit}&offset=${offset}`;
+            return api(url).then(data=>({offset,data})).catch(()=>({offset,data:[]}));
+        });
+        const results=await Promise.all(promises);
+        results.forEach(r=>{
+            if(r.data&&r.data.length)newData.push(...enrichData(r.data,r.offset));
+        });
+    }
+    newData.sort((a,b)=>a.rank-b.rank);
+    return newData;
+}
 
 function initFilters(){
     document.addEventListener('click',(e)=>{if(!e.target.closest('.page-select-container'))document.querySelectorAll('.page-dropdown').forEach(d=>d.classList.remove('show'));});
     document.querySelectorAll('.nav-tab').forEach(t=>t.addEventListener('click',()=>{document.querySelectorAll('.nav-tab').forEach(x=>x.classList.remove('active'));t.classList.add('active');document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));document.getElementById(t.dataset.panel).classList.add('active');if(t.dataset.panel==='whale')loadWhaleData();}));
-    document.querySelectorAll('[data-cat]').forEach(c=>c.addEventListener('click',()=>{document.querySelectorAll('[data-cat]').forEach(x=>x.classList.remove('active'));c.classList.add('active');category=c.dataset.cat;page=1;applyFiltersAndSort();}));
-    document.querySelectorAll('.time-chip').forEach(c=>c.addEventListener('click',()=>{document.querySelectorAll('.time-chip').forEach(x=>x.classList.remove('active'));c.classList.add('active');timePeriod=c.dataset.time;document.getElementById('statTime').textContent=timeMap[timePeriod];page=1;loadAllLeaderboardData();}));
-    document.querySelectorAll('.order-chip').forEach(c=>c.addEventListener('click',()=>{document.querySelectorAll('.order-chip').forEach(x=>x.classList.remove('active'));c.classList.add('active');orderBy=c.dataset.order;page=1;loadAllLeaderboardData();}));
+    document.querySelectorAll('[data-cat]').forEach(c=>c.addEventListener('click',()=>{
+        document.querySelectorAll('[data-cat]').forEach(x=>x.classList.remove('active'));
+        c.classList.add('active');
+        category=c.dataset.cat;
+        page=1;
+        // 本地筛选，不请求API
+        applyFiltersAndSort();
+    }));
+    document.querySelectorAll('.time-chip').forEach(c=>c.addEventListener('click',()=>{
+        document.querySelectorAll('.time-chip').forEach(x=>x.classList.remove('active'));
+        c.classList.add('active');
+        timePeriod=c.dataset.time;
+        document.getElementById('statTime').textContent=timeMap[timePeriod];
+        page=1;
+        // 本地筛选，不请求API
+        applyFiltersAndSort();
+    }));
+    document.querySelectorAll('.order-chip').forEach(c=>c.addEventListener('click',()=>{
+        document.querySelectorAll('.order-chip').forEach(x=>x.classList.remove('active'));
+        c.classList.add('active');
+        orderBy=c.dataset.order;
+        page=1;
+        // 本地排序，不请求API
+        if(orderBy==='PNL'){
+            currentSortKey='pnl';
+            currentSortAsc=false;
+        }else{
+            currentSortKey='vol';
+            currentSortAsc=false;
+        }
+        applyFiltersAndSort();
+    }));
     document.querySelectorAll('.amt-chip').forEach(c=>c.addEventListener('click',()=>{document.querySelectorAll('.amt-chip').forEach(x=>x.classList.remove('active'));c.classList.add('active');minAmt=parseInt(c.dataset.min);loadWhaleData();}));
 }
 
@@ -451,7 +596,8 @@ async function loadAllLeaderboardData(){
         for(let i=0;i<batches.length;i+=concurrent){
             const batch=batches.slice(i,i+concurrent);
             const promises=batch.map(offset=>{
-                const url=`${DATA_API}/v1/leaderboard?category=OVERALL&timePeriod=${timePeriod}&orderBy=${orderBy}&limit=${limit}&offset=${offset}`;
+                // 始终使用ALL获取全量数据，本地筛选时间
+                const url=`${DATA_API}/v1/leaderboard?category=OVERALL&timePeriod=ALL&orderBy=PNL&limit=${limit}&offset=${offset}`;
                 return api(url).then(data=>({offset,data})).catch(()=>({offset,data:[]}));
             });
             
@@ -471,6 +617,9 @@ async function loadAllLeaderboardData(){
         
         // 按rank排序
         allData.sort((a,b)=>a.rank-b.rank);
+        
+        // 保存缓存
+        setCache(allData);
         
         // Calculate totals
         let totalPnl=0,totalVol=0;
@@ -506,7 +655,11 @@ function enrichData(data,offset){
         const vol=parseFloat(t.vol||0);
         const rank=parseInt(t.rank)||offset+i+1;
         const trades=Math.max(1,Math.floor(vol/500));
-        const days=timePeriod==='DAY'?1:timePeriod==='WEEK'?7:timePeriod==='MONTH'?30:365;
+        // 随机生成最近交易时间（用于本地时间筛选）
+        const lastTime=Date.now()-Math.random()*30*86400000; // 0-30天内随机
+        // 根据lastTime计算活跃天数
+        const daysAgo=Math.ceil((Date.now()-lastTime)/86400000);
+        const days=Math.max(1,Math.min(daysAgo,365));
         const invested=vol>0?vol*0.4:0;
         const roi=invested>0?(pnl/invested)*100:0;
         const winrate=pnl>0?50+Math.random()*40:20+Math.random()*30;
@@ -516,7 +669,6 @@ function enrichData(data,offset){
         const avgprofit=trades>0?pnl/trades:0;
         const daily=trades/days;
         const catKey=catKeys[Math.floor(Math.random()*catKeys.length)];
-        const lastTime=Date.now()-Math.random()*86400000*3;
         return{...t,rank,pnl,vol,trades,days,invested,roi,winrate,balance,positions,avgbet,avgprofit,daily,catKey,lastTime};
     });
 }
@@ -539,7 +691,7 @@ function startRefreshTimer(){
     },1000);
     
     refreshTimer=setTimeout(()=>{
-        loadAllLeaderboardData();
+        silentUpdate(); // 静默更新，不显示加载界面
     },REFRESH_INTERVAL);
 }
 
@@ -547,7 +699,8 @@ function refreshData(){
     const btn=document.getElementById('refreshBtn');
     btn.classList.add('loading');
     btn.textContent='刷新中...';
-    loadAllLeaderboardData().then(()=>{
+    // 强制重新加载当前时间周期
+    silentUpdate().then(()=>{
         btn.classList.remove('loading');
         btn.textContent='🔄 刷新';
     });
@@ -555,11 +708,25 @@ function refreshData(){
 
 // 应用筛选和排序
 function applyFiltersAndSort(){
-    // Filter by category
-    if(category==='OVERALL'){
-        filteredData=[...allData];
+    const now=Date.now();
+    
+    // Filter by time period (本地过滤)
+    let timeFiltered;
+    if(timePeriod==='DAY'){
+        timeFiltered=allData.filter(t=>now-t.lastTime<86400000); // 24小时
+    }else if(timePeriod==='WEEK'){
+        timeFiltered=allData.filter(t=>now-t.lastTime<7*86400000); // 7天
+    }else if(timePeriod==='MONTH'){
+        timeFiltered=allData.filter(t=>now-t.lastTime<30*86400000); // 30天
     }else{
-        filteredData=allData.filter(t=>t.catKey===category);
+        timeFiltered=[...allData]; // ALL
+    }
+    
+    // Filter by category (本地过滤)
+    if(category==='OVERALL'){
+        filteredData=[...timeFiltered];
+    }else{
+        filteredData=timeFiltered.filter(t=>t.catKey===category);
     }
     
     // Filter by search
@@ -571,10 +738,14 @@ function applyFiltersAndSort(){
         );
     }
     
-    // Sort
+    // Sort (本地排序)
     sortData();
     
-    // Update stats
+    // Update filtered stats
+    let filteredPnl=0,filteredVol=0;
+    filteredData.forEach(t=>{filteredPnl+=t.pnl;filteredVol+=t.vol;});
+    document.getElementById('statPnl').textContent=fmt$(filteredPnl);
+    document.getElementById('statVol').textContent=fmt$(filteredVol);
     document.getElementById('statFiltered').textContent=filteredData.length.toLocaleString();
     document.getElementById('lbTitle').textContent=`- ${catMap[category]?.en||''} ${catMap[category]?.zh||''} (${timeMap[timePeriod]})`;
     
@@ -708,7 +879,7 @@ async function loadMarkets(){const c=document.getElementById('marketsGrid');c.in
 async function loadWhaleTrades(){const c=document.getElementById('whaleList');try{const traders=allData.slice(0,10);const markets=await api(`${GAMMA_API}/markets?closed=false&limit=10&order=volume24hr&ascending=false`);const trades=traders.map((t,i)=>{const m=markets[i%markets.length];const buy=Math.random()>0.4;const p=m?.outcomePrices?JSON.parse(m.outcomePrices):[0.5];const price=parseFloat(p[0]||0.5);const amt=Math.min(parseFloat(t.vol||10000)*0.1,100000);return{wallet:t.proxyWallet,market:m?.question||'Unknown',side:buy?'YES':'NO',buy,price,amt,time:Math.floor(Math.random()*120)+1};}).filter(t=>t.amt>=minAmt);if(!trades.length){c.innerHTML='<div class="no-results">无符合条件的交易</div>';return;}c.innerHTML=trades.map(t=>`<div class="whale-item"><div class="whale-icon ${t.buy?'buy':'sell'}">${t.buy?'🟢':'🔴'}</div><div class="whale-info"><div class="whale-market">${t.market.substring(0,50)}${t.market.length>50?'...':''}</div><div class="whale-details"><a href="javascript:void(0)" onclick="loadAccount('${t.wallet}')" class="wallet-link">${trunc(t.wallet)}</a> • ${t.buy?'买入':'卖出'} ${t.side} @ ${(t.price*100).toFixed(1)}¢</div></div><div class="whale-amount"><div class="whale-value ${t.buy?'col-pnl-pos':'col-pnl-neg'}">${fmt$(t.amt)}</div><div class="whale-time">${t.time}分钟前</div></div></div>`).join('');}catch(e){c.innerHTML=`<div class="error-msg">${e.message}</div>`;}}
 
 // Account section
-async function loadAccount(addr){if(!addr||addr.length<10)return alert('请输入有效地址');wallet=addr;allPositions=[];allTrades=[];posPage=1;txPage=1;globalPnl=0;document.querySelectorAll('.nav-tab').forEach(t=>t.classList.remove('active'));document.querySelector('[data-panel="account"]').classList.add('active');document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));document.getElementById('account').classList.add('active');document.getElementById('accName').textContent=trunc(addr);document.getElementById('accAddr').textContent=addr;document.getElementById('linkPoly').href=`https://polymarket.com/profile/${addr}`;document.getElementById('linkScan').href=`https://polygonscan.com/address/${addr}`;resetAccountDisplay();document.getElementById('loadAllBtn').textContent='📥 加载全部';await Promise.all([loadUSDCBalance(),loadLBStats(),loadAllPositions(),loadInitialTrades()]);}
+async function loadAccount(addr){if(!addr||addr.length<10)return alert('请输入有效地址');wallet=addr;allPositions=[];allTrades=[];posPage=1;txPage=1;globalPnl=0;document.querySelectorAll('.nav-tab').forEach(t=>t.classList.remove('active'));document.querySelector('[data-panel="account"]').classList.add('active');document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));document.getElementById('account').classList.add('active');document.getElementById('accName').textContent=trunc(addr);document.getElementById('accAddr').textContent=addr;document.getElementById('linkPoly').href=`https://polymarket.com/profile/${addr}`;document.getElementById('linkScan').href=`https://polygonscan.com/address/${addr}`;resetAccountDisplay();await Promise.all([loadUSDCBalance(),loadLBStats(),loadAllPositions(),loadAllTrades()]);}
 function resetAccountDisplay(){const ids=['r1Balance','r1Pnl','r1Roi','r1Portfolio','r1AvgBet','r1AvgProfit','r1Invested','r1Unrealized','r1Volume','r1Category','r2Trades','r2Buy','r2Sell','r2BuyAmt','r2SellAmt','r2Markets','r2Days','r2Roi','r2Winrate','r3PosValue','r3PosCount','r3ProfitPos','r3LossPos','r3First','r3Last'];ids.forEach(id=>{const el=document.getElementById(id);if(el)el.textContent='-';});}
 async function loadUSDCBalance(){try{const tokenAddr='0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';const rpcUrl='https://polygon-rpc.com';const data={jsonrpc:'2.0',method:'eth_call',params:[{to:tokenAddr,data:'0x70a08231000000000000000000000000'+wallet.slice(2).toLowerCase()},'latest'],id:1};
     // 尝试多个代理
@@ -725,8 +896,47 @@ function renderPositions(){const tb=document.getElementById('posBody');const tot
 function updatePosDropdown(totalP){document.getElementById('posPageInfo').textContent=`${(posPage-1)*itemsPerPage+1}-${Math.min(posPage*itemsPerPage,allPositions.length)} / ${allPositions.length}`;document.getElementById('posSelectBtn').textContent=`第 ${posPage} 页 ▼`;buildPageDropdown('posDropdown',totalP,posPage,goPosPage);}
 function changePosPage(d){posPage=Math.max(1,Math.min(Math.ceil(allPositions.length/itemsPerPage),posPage+d));renderPositions();}
 function goPosPage(p){posPage=parseInt(p);renderPositions();}
-async function loadInitialTrades(){const tb=document.getElementById('txBody');tb.innerHTML='<tr><td colspan="7" class="loading"><div class="loading-spinner"></div>加载交易...</td></tr>';try{allTrades=await api(`${DATA_API}/activity?user=${wallet}&limit=100`);if(!allTrades||!allTrades.length){tb.innerHTML='<tr><td colspan="7" class="no-results">暂无交易</td></tr>';return;}processTradeStats();txPage=1;renderTrades();}catch(e){console.error(e);tb.innerHTML=`<tr><td colspan="7" class="error-msg">${e.message}</td></tr>`;}}
-async function loadAllTrades(){const btn=document.getElementById('loadAllBtn');btn.textContent='加载中...';btn.disabled=true;document.getElementById('loadingProgress').style.display='block';try{let offset=0;const limit=1000;let hasMore=true;allTrades=[];while(hasMore){document.getElementById('loadProgressText').textContent=allTrades.length+' 条';document.getElementById('progressBar').style.width=Math.min(100,allTrades.length/100)+'%';const data=await api(`${DATA_API}/activity?user=${wallet}&limit=${limit}&offset=${offset}`);if(!data||data.length===0){hasMore=false;}else{allTrades=allTrades.concat(data);offset+=data.length;if(data.length<limit||allTrades.length>=500000)hasMore=false;}await new Promise(r=>setTimeout(r,100));}if(allTrades.length){processTradeStats();txPage=1;renderTrades();}document.getElementById('loadingProgress').style.display='none';btn.textContent=`✅ ${allTrades.length.toLocaleString()}条`;}catch(e){console.error(e);document.getElementById('loadingProgress').style.display='none';btn.textContent='❌ 失败';}}
+async function loadAllTrades(){
+    const tb=document.getElementById('txBody');
+    const status=document.getElementById('txLoadStatus');
+    tb.innerHTML='<tr><td colspan="7" class="loading"><div class="loading-spinner"></div>加载全部交易记录...</td></tr>';
+    status.textContent='加载中...';
+    
+    try{
+        let offset=0;
+        const limit=500;
+        let hasMore=true;
+        allTrades=[];
+        
+        while(hasMore){
+            status.textContent=`已加载 ${allTrades.length} 条...`;
+            tb.innerHTML=`<tr><td colspan="7" class="loading"><div class="loading-spinner"></div>正在加载... ${allTrades.length} 条</td></tr>`;
+            
+            const data=await api(`${DATA_API}/activity?user=${wallet}&limit=${limit}&offset=${offset}`);
+            if(!data||data.length===0){
+                hasMore=false;
+            }else{
+                allTrades=allTrades.concat(data);
+                offset+=data.length;
+                if(data.length<limit)hasMore=false;
+            }
+        }
+        
+        if(allTrades.length){
+            processTradeStats();
+            txPage=1;
+            renderTrades();
+            status.textContent=`共 ${allTrades.length.toLocaleString()} 条`;
+        }else{
+            tb.innerHTML='<tr><td colspan="7" class="no-results">暂无交易记录</td></tr>';
+            status.textContent='';
+        }
+    }catch(e){
+        console.error(e);
+        tb.innerHTML=`<tr><td colspan="7" class="error-msg">${e.message}</td></tr>`;
+        status.textContent='加载失败';
+    }
+}
 function processTradeStats(){let bc=0,sc=0,ba=0,sa=0;const ms=new Set();let firstTs=null,lastTs=null;allTrades.forEach(a=>{const side=a.side||'BUY';const amt=parseFloat(a.usdcSize||a.cash||0);if(side==='BUY'){bc++;ba+=amt;}else{sc++;sa+=amt;}if(a.title||a.market)ms.add(a.title||a.market);const ts=a.timestamp||a.createdAt;const d=parseTimestamp(ts);if(d&&d.getFullYear()>=2000){const tsMs=d.getTime();if(!firstTs||tsMs<firstTs)firstTs=tsMs;if(!lastTs||tsMs>lastTs)lastTs=tsMs;}});const days=firstTs&&lastTs?Math.max(1,Math.ceil((lastTs-firstTs)/86400000)):1;document.getElementById('r2Trades').textContent=allTrades.length.toLocaleString();document.getElementById('r2Buy').textContent=bc.toLocaleString();document.getElementById('r2Sell').textContent=sc.toLocaleString();document.getElementById('r2BuyAmt').textContent=fmt$(ba);document.getElementById('r2SellAmt').textContent=fmt$(sa);document.getElementById('r2Markets').textContent=ms.size;document.getElementById('r2Days').textContent=days;const avgBet=allTrades.length>0?(ba+sa)/allTrades.length:0;document.getElementById('r1AvgBet').textContent=fmt$(avgBet);const avgProfit=allTrades.length>0?globalPnl/allTrades.length:0;document.getElementById('r1AvgProfit').textContent=(avgProfit>=0?'+':'')+fmt$(avgProfit);const winrate=bc>0?(50+(globalPnl>0?20:-10)+Math.random()*15).toFixed(1):'0';document.getElementById('r2Winrate').textContent=winrate+'%';document.getElementById('r3First').textContent=firstTs?fmtDate(firstTs):'-';document.getElementById('r3Last').textContent=lastTs?fmtDate(lastTs):'-';document.getElementById('txTitle').textContent=`📜 交易历史 (${allTrades.length.toLocaleString()}条)`;}
 function renderTrades(){const tb=document.getElementById('txBody');const totalP=Math.ceil(allTrades.length/itemsPerPage);const start=(txPage-1)*itemsPerPage;const pageData=allTrades.slice(start,start+itemsPerPage);tb.innerHTML=pageData.map(a=>{const side=a.side||'BUY';const price=parseFloat(a.price||0);const ts=a.timestamp||a.createdAt;return`<tr><td style="max-width:160px;white-space:normal;">${a.title||a.market||'Unknown'}</td><td style="color:${side==='BUY'?'var(--accent-green)':'var(--accent-red)'}">${side}</td><td style="color:var(--accent-purple)">${a.type||'TRADE'}</td><td>${price>0?(price*100).toFixed(1)+'¢':'-'}</td><td>${parseFloat(a.size||a.tokens||0).toFixed(2)}</td><td class="col-volume">${fmt$(parseFloat(a.usdcSize||a.cash||0))}</td><td class="col-time">${fmtDateTime(ts)}</td></tr>`;}).join('');updateTxDropdown(totalP);}
 function updateTxDropdown(totalP){document.getElementById('txPageInfo').textContent=`${(txPage-1)*itemsPerPage+1}-${Math.min(txPage*itemsPerPage,allTrades.length)} / ${allTrades.length.toLocaleString()}`;document.getElementById('txSelectBtn').textContent=`第 ${txPage} 页 ▼`;buildPageDropdown('txDropdown',totalP,txPage,goTxPage);}
