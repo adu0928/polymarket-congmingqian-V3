@@ -429,34 +429,48 @@ function initFilters(){
     document.querySelectorAll('.amt-chip').forEach(c=>c.addEventListener('click',()=>{document.querySelectorAll('.amt-chip').forEach(x=>x.classList.remove('active'));c.classList.add('active');minAmt=parseInt(c.dataset.min);loadWhaleData();}));
 }
 
-// 加载全部5000条数据
+// 加载全部5000条数据 - 并发加速版
 async function loadAllLeaderboardData(){
     showLoadingOverlay(true);
     document.getElementById('liveDot').classList.add('loading');
     
     try{
         allData=[];
-        let offset=0;
-        const limit=50;
+        const limit=100; // 每批100条
+        const concurrent=5; // 5个并发请求
+        let completed=0;
         
-        while(offset<MAX_DATA){
-            const url=`${DATA_API}/v1/leaderboard?category=OVERALL&timePeriod=${timePeriod}&orderBy=${orderBy}&limit=${limit}&offset=${offset}`;
-            const data=await api(url);
-            
-            if(!data||data.length===0)break;
-            
-            allData=allData.concat(enrichData(data,offset));
-            offset+=data.length;
-            
-            // Update progress
-            const pct=Math.min(100,(offset/MAX_DATA)*100);
-            document.getElementById('loadProgress').style.width=pct+'%';
-            document.getElementById('loadCount').textContent=`${offset} / ${MAX_DATA}`;
-            document.getElementById('loadText').textContent=`正在加载第 ${Math.ceil(offset/limit)} 批数据...`;
-            
-            if(data.length<limit)break;
-            await new Promise(r=>setTimeout(r,50));
+        // 生成所有请求
+        const totalBatches=Math.ceil(MAX_DATA/limit);
+        const batches=[];
+        for(let i=0;i<totalBatches;i++){
+            batches.push(i*limit);
         }
+        
+        // 并发执行
+        for(let i=0;i<batches.length;i+=concurrent){
+            const batch=batches.slice(i,i+concurrent);
+            const promises=batch.map(offset=>{
+                const url=`${DATA_API}/v1/leaderboard?category=OVERALL&timePeriod=${timePeriod}&orderBy=${orderBy}&limit=${limit}&offset=${offset}`;
+                return api(url).then(data=>({offset,data})).catch(()=>({offset,data:[]}));
+            });
+            
+            const results=await Promise.all(promises);
+            results.forEach(r=>{
+                if(r.data&&r.data.length){
+                    allData=allData.concat(enrichData(r.data,r.offset));
+                }
+            });
+            
+            completed+=batch.length;
+            const loaded=Math.min(completed*limit,MAX_DATA);
+            document.getElementById('loadProgress').style.width=(completed/totalBatches*100)+'%';
+            document.getElementById('loadCount').textContent=`${loaded} / ${MAX_DATA}`;
+            document.getElementById('loadText').textContent=`并发加载中... (${concurrent}x加速)`;
+        }
+        
+        // 按rank排序
+        allData.sort((a,b)=>a.rank-b.rank);
         
         // Calculate totals
         let totalPnl=0,totalVol=0;
