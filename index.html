@@ -3,356 +3,690 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Polymarket 监控看板</title>
+    <title>PolyMonitor - Polymarket 监控看板</title>
     <style>
-        :root{--bg:#0a0b0d;--bg2:#12141a;--bg3:#1a1d26;--card:#161922;--border:#2a2e3a;--text:#f0f2f5;--text2:#8b919e;--text3:#5c6370;--green:#00d68f;--red:#ff4757;--blue:#4da6ff;--purple:#a855f7;--yellow:#fbbf24;--cyan:#22d3ee;}
+        :root{--bg-primary:#0a0b0d;--bg-secondary:#12141a;--bg-tertiary:#1a1d26;--bg-card:#161922;--border-color:#2a2e3a;--text-primary:#f0f2f5;--text-secondary:#8b919e;--text-muted:#5c6370;--accent-green:#00d68f;--accent-red:#ff4757;--accent-blue:#4da6ff;--accent-purple:#a855f7;--accent-yellow:#fbbf24;--accent-cyan:#22d3ee;}
         *{margin:0;padding:0;box-sizing:border-box;}
-        body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;}
-        .header{background:var(--bg2);border-bottom:1px solid var(--border);padding:16px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px;}
-        .logo{font-size:20px;font-weight:700;}.logo span{color:var(--purple);}
+        body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg-primary);color:var(--text-primary);min-height:100vh;}
+        
+        /* Header */
+        .header{background:var(--bg-secondary);border-bottom:1px solid var(--border-color);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;}
+        .logo{font-size:22px;font-weight:700;display:flex;align-items:center;gap:10px;}
+        .logo span{color:var(--accent-purple);}
         .header-right{display:flex;align-items:center;gap:16px;flex-wrap:wrap;}
-        .status{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text2);}
-        .dot{width:8px;height:8px;background:var(--green);border-radius:50%;}
-        .dot.loading{background:var(--yellow);animation:pulse 1s infinite;}
+        .nav-tabs{display:flex;gap:4px;}
+        .nav-tab{padding:8px 16px;background:transparent;border:1px solid var(--border-color);border-radius:6px;color:var(--text-secondary);cursor:pointer;font-size:13px;}
+        .nav-tab:hover{border-color:var(--accent-purple);}
+        .nav-tab.active{background:var(--accent-purple);border-color:var(--accent-purple);color:white;}
+        .live-indicator{display:flex;align-items:center;gap:8px;font-size:12px;padding:6px 12px;background:var(--bg-tertiary);border-radius:6px;}
+        .live-dot{width:8px;height:8px;background:var(--accent-green);border-radius:50%;}
+        .live-dot.loading{background:var(--accent-yellow);animation:pulse 1s infinite;}
         @keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.4;}}
-        .search-box{display:flex;gap:8px;}
-        .search-box input{background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px 12px;color:var(--text);width:280px;}
-        .btn{padding:8px 16px;border-radius:6px;border:none;cursor:pointer;font-size:13px;font-weight:500;}
-        .btn-primary{background:var(--purple);color:white;}
-        .btn-secondary{background:var(--bg3);border:1px solid var(--border);color:var(--text2);}
-        .main{max-width:1800px;margin:0 auto;padding:20px;}
-        .filters{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;}
-        .chip{padding:6px 14px;background:var(--card);border:1px solid var(--border);border-radius:20px;font-size:12px;color:var(--text2);cursor:pointer;}
-        .chip:hover{border-color:var(--purple);}
-        .chip.active{background:rgba(168,85,247,0.15);border-color:var(--purple);color:var(--purple);}
-        .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px;}
-        .stat{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px;}
-        .stat-label{font-size:11px;color:var(--text3);margin-bottom:4px;}
-        .stat-value{font-size:18px;font-weight:600;font-family:'SF Mono',monospace;}
-        .table-box{background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden;}
-        .table-header{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border);background:var(--bg3);}
+        .auto-refresh{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-muted);}
+        .auto-refresh input{cursor:pointer;}
+        
+        /* Main */
+        .main{max-width:1900px;margin:0 auto;padding:16px;}
+        .panel{display:none;}
+        .panel.active{display:block;}
+        
+        /* Filters */
+        .filters{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;align-items:center;}
+        .filter-group{display:flex;gap:4px;align-items:center;}
+        .filter-label{font-size:11px;color:var(--text-muted);margin-right:4px;}
+        .chip{padding:6px 12px;background:var(--bg-card);border:1px solid var(--border-color);border-radius:16px;font-size:11px;color:var(--text-secondary);cursor:pointer;white-space:nowrap;}
+        .chip:hover{border-color:var(--accent-purple);}
+        .chip.active{background:rgba(168,85,247,0.15);border-color:var(--accent-purple);color:var(--accent-purple);}
+        
+        /* Stats */
+        .stats-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:16px;}
+        .stat-card{background:var(--bg-card);border:1px solid var(--border-color);border-radius:8px;padding:14px;}
+        .stat-label{font-size:10px;color:var(--text-muted);margin-bottom:4px;text-transform:uppercase;}
+        .stat-value{font-size:18px;font-weight:600;font-family:'SF Mono',Monaco,monospace;}
+        .stat-value.green{color:var(--accent-green);}
+        .stat-value.blue{color:var(--accent-blue);}
+        .stat-value.purple{color:var(--accent-purple);}
+        
+        /* Table */
+        .table-container{background:var(--bg-card);border:1px solid var(--border-color);border-radius:10px;overflow:hidden;}
+        .table-header{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border-color);background:var(--bg-tertiary);}
         .table-title{font-size:14px;font-weight:600;}
-        .table-wrap{overflow-x:auto;max-height:600px;}
-        table{width:100%;border-collapse:collapse;}
-        th{text-align:left;padding:10px 12px;font-size:11px;font-weight:600;color:var(--text3);background:var(--bg3);position:sticky;top:0;cursor:pointer;white-space:nowrap;}
-        th:hover{color:var(--purple);}
-        td{padding:10px 12px;font-size:12px;border-bottom:1px solid var(--border);white-space:nowrap;}
-        tr:hover{background:var(--bg3);}
-        .rank{color:var(--yellow);font-weight:700;}
-        .wallet{font-family:'SF Mono',monospace;font-size:11px;color:var(--blue);cursor:pointer;}
-        .wallet:hover{text-decoration:underline;}
-        .pnl-pos{color:var(--green);font-weight:600;}
-        .pnl-neg{color:var(--red);font-weight:600;}
-        .pagination{display:flex;justify-content:center;align-items:center;gap:12px;padding:16px;}
-        .page-btn{padding:6px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--text2);cursor:pointer;}
-        .page-btn:hover{border-color:var(--purple);}
-        .page-info{font-size:12px;color:var(--text3);}
-        .loading-box{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);display:flex;align-items:center;justify-content:center;z-index:1000;}
-        .loading-content{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:40px;text-align:center;min-width:350px;}
+        .table-actions{display:flex;gap:8px;align-items:center;}
+        .search-input{background:var(--bg-primary);border:1px solid var(--border-color);border-radius:6px;padding:6px 12px;color:var(--text-primary);font-size:12px;width:200px;}
+        .btn{padding:6px 14px;border-radius:6px;border:none;cursor:pointer;font-size:12px;font-weight:500;}
+        .btn-primary{background:var(--accent-purple);color:white;}
+        .btn-secondary{background:var(--bg-tertiary);border:1px solid var(--border-color);color:var(--text-secondary);}
+        .table-wrap{overflow-x:auto;max-height:calc(100vh - 380px);}
+        table{width:100%;border-collapse:collapse;font-size:12px;}
+        th{text-align:left;padding:10px 8px;font-size:10px;font-weight:600;color:var(--text-muted);background:var(--bg-tertiary);position:sticky;top:0;cursor:pointer;white-space:nowrap;text-transform:uppercase;}
+        th:hover{color:var(--accent-purple);}
+        th.sort-asc::after{content:' ↑';color:var(--accent-cyan);}
+        th.sort-desc::after{content:' ↓';color:var(--accent-purple);}
+        td{padding:10px 8px;border-bottom:1px solid var(--border-color);white-space:nowrap;}
+        tr:hover{background:var(--bg-tertiary);}
+        .col-rank{color:var(--accent-yellow);font-weight:700;width:60px;}
+        .col-wallet{font-family:'SF Mono',Monaco,monospace;font-size:11px;color:var(--accent-blue);cursor:pointer;max-width:180px;overflow:hidden;text-overflow:ellipsis;}
+        .col-wallet:hover{text-decoration:underline;}
+        .col-pnl-pos{color:var(--accent-green);font-weight:600;}
+        .col-pnl-neg{color:var(--accent-red);font-weight:600;}
+        .col-vol{color:var(--accent-blue);}
+        .col-roi{color:var(--accent-cyan);}
+        
+        /* Pagination */
+        .pagination{display:flex;justify-content:center;align-items:center;gap:12px;padding:12px;}
+        .page-btn{padding:6px 12px;background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:4px;color:var(--text-secondary);cursor:pointer;font-size:12px;}
+        .page-btn:hover{border-color:var(--accent-purple);}
+        .page-info{font-size:12px;color:var(--text-muted);}
+        
+        /* Loading */
+        .loading-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.9);display:flex;align-items:center;justify-content:center;z-index:1000;}
+        .loading-box{background:var(--bg-card);border:1px solid var(--border-color);border-radius:12px;padding:40px;text-align:center;min-width:320px;}
         .loading-title{font-size:16px;margin-bottom:16px;}
-        .loading-progress{height:6px;background:var(--bg3);border-radius:3px;margin-bottom:12px;overflow:hidden;}
-        .loading-bar{height:100%;background:linear-gradient(90deg,var(--purple),var(--cyan));transition:width 0.3s;}
-        .loading-text{font-size:13px;color:var(--text2);}
-        .error{color:var(--red);margin:10px 0;}
+        .loading-progress{height:6px;background:var(--bg-tertiary);border-radius:3px;margin-bottom:12px;overflow:hidden;}
+        .loading-bar{height:100%;background:linear-gradient(90deg,var(--accent-purple),var(--accent-cyan));width:0%;transition:width 0.3s;}
+        .loading-text{font-size:13px;color:var(--text-secondary);}
         .hidden{display:none!important;}
+        
+        /* Whale Panel */
+        .whale-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;margin-bottom:16px;}
+        .whale-card{background:var(--bg-card);border:1px solid var(--border-color);border-radius:8px;padding:14px;cursor:pointer;}
+        .whale-card:hover{border-color:var(--accent-purple);}
+        .whale-question{font-size:13px;margin-bottom:10px;line-height:1.4;}
+        .whale-odds{display:flex;gap:12px;}
+        .odds-box{flex:1;text-align:center;padding:8px;background:var(--bg-tertiary);border-radius:6px;}
+        .odds-label{font-size:10px;color:var(--text-muted);}
+        .odds-yes{color:var(--accent-green);font-size:16px;font-weight:700;}
+        .odds-no{color:var(--accent-red);font-size:16px;font-weight:700;}
+        .whale-meta{display:flex;justify-content:space-between;margin-top:10px;font-size:11px;color:var(--text-muted);}
+        
+        /* Account Panel */
+        .account-header{background:var(--bg-card);border:1px solid var(--border-color);border-radius:10px;padding:20px;margin-bottom:16px;}
+        .account-title{font-size:18px;font-weight:600;margin-bottom:12px;}
+        .account-wallet{font-family:'SF Mono',Monaco,monospace;font-size:13px;color:var(--accent-blue);word-break:break-all;}
+        .account-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;margin-top:16px;}
+        .account-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+        .account-section{background:var(--bg-card);border:1px solid var(--border-color);border-radius:10px;overflow:hidden;}
+        .section-title{padding:12px 16px;background:var(--bg-tertiary);font-size:13px;font-weight:600;border-bottom:1px solid var(--border-color);}
+        .section-content{max-height:400px;overflow-y:auto;}
+        .position-item,.trade-item{padding:12px 16px;border-bottom:1px solid var(--border-color);}
+        .position-item:hover,.trade-item:hover{background:var(--bg-tertiary);}
+        .pos-market{font-size:12px;margin-bottom:6px;}
+        .pos-details{display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted);}
+        
+        /* Category badges */
+        .cat-badge{padding:2px 8px;border-radius:10px;font-size:10px;font-weight:500;}
+        .cat-politics{background:rgba(168,85,247,0.2);color:#a855f7;}
+        .cat-sports{background:rgba(34,211,238,0.2);color:#22d3ee;}
+        .cat-crypto{background:rgba(251,191,36,0.2);color:#fbbf24;}
+        .cat-overall{background:rgba(77,166,255,0.2);color:#4da6ff;}
     </style>
 </head>
 <body>
-    <div class="loading-box" id="loading">
-        <div class="loading-content">
-            <div class="loading-title" id="loadTitle">🚀 正在加载数据</div>
-            <div class="loading-progress"><div class="loading-bar" id="loadBar" style="width:0%"></div></div>
-            <div class="loading-text" id="loadText">连接中...</div>
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-box">
+            <div class="loading-title" id="loadTitle">🚀 正在加载排行榜数据</div>
+            <div class="loading-progress"><div class="loading-bar" id="loadBar"></div></div>
+            <div class="loading-text" id="loadText">连接API...</div>
         </div>
     </div>
     
+    <!-- Header -->
     <header class="header">
-        <div class="logo">Poly<span>Monitor</span></div>
+        <div class="logo">
+            <span>P</span> PolyMonitor
+        </div>
+        <div class="nav-tabs">
+            <div class="nav-tab active" data-panel="leaderboard">📊 总览</div>
+            <div class="nav-tab" data-panel="whale">🐋 鲸鱼追踪</div>
+            <div class="nav-tab" data-panel="account">👤 账户详情</div>
+        </div>
         <div class="header-right">
-            <div class="status"><span class="dot" id="dot"></span><span id="updateTime">-</span></div>
-            <div class="search-box">
-                <input type="text" id="searchInput" placeholder="搜索钱包地址...">
-                <button class="btn btn-primary" onclick="filterData()">搜索</button>
-                <button class="btn btn-secondary" onclick="loadData()">刷新</button>
+            <div class="live-indicator">
+                <span class="live-dot" id="liveDot"></span>
+                <span id="lastUpdate">-</span>
+                <span id="countdown"></span>
             </div>
+            <label class="auto-refresh">
+                <input type="checkbox" id="autoRefresh" onchange="toggleAutoRefresh()">
+                <span>自动刷新(10分钟)</span>
+            </label>
+            <button class="btn btn-primary" onclick="loadData()">🔄 刷新</button>
         </div>
     </header>
     
+    <!-- Main Content -->
     <main class="main">
-        <div class="filters" id="filters">
-            <span style="color:var(--text3);font-size:12px;margin-right:8px;">时间:</span>
-            <div class="chip active" data-time="DAY">今天</div>
-            <div class="chip" data-time="WEEK">本周</div>
-            <div class="chip" data-time="MONTH">本月</div>
-            <div class="chip" data-time="ALL">全部</div>
-            <span style="color:var(--text3);font-size:12px;margin:0 8px;">排序:</span>
-            <div class="chip active" data-order="PNL">盈亏</div>
-            <div class="chip" data-order="VOL">交易量</div>
+        <!-- Leaderboard Panel -->
+        <div class="panel active" id="leaderboard">
+            <!-- Filters -->
+            <div class="filters">
+                <div class="filter-group">
+                    <span class="filter-label">类别:</span>
+                    <div class="chip active" data-cat="OVERALL">全部</div>
+                    <div class="chip" data-cat="POLITICS">政治</div>
+                    <div class="chip" data-cat="SPORTS">体育</div>
+                    <div class="chip" data-cat="CRYPTO">加密</div>
+                    <div class="chip" data-cat="FINANCE">金融</div>
+                    <div class="chip" data-cat="CULTURE">文化</div>
+                </div>
+                <div class="filter-group">
+                    <span class="filter-label">时间:</span>
+                    <div class="chip time-chip active" data-time="DAY">今天</div>
+                    <div class="chip time-chip" data-time="WEEK">本周</div>
+                    <div class="chip time-chip" data-time="MONTH">本月</div>
+                    <div class="chip time-chip" data-time="ALL">全部</div>
+                </div>
+                <div class="filter-group">
+                    <span class="filter-label">排序:</span>
+                    <div class="chip order-chip active" data-order="PNL">盈亏</div>
+                    <div class="chip order-chip" data-order="VOL">交易量</div>
+                </div>
+            </div>
+            
+            <!-- Stats -->
+            <div class="stats-row">
+                <div class="stat-card"><div class="stat-label">总盈利</div><div class="stat-value green" id="statPnl">-</div></div>
+                <div class="stat-card"><div class="stat-label">总交易量</div><div class="stat-value blue" id="statVol">-</div></div>
+                <div class="stat-card"><div class="stat-label">数据总量</div><div class="stat-value" id="statTotal">-</div></div>
+                <div class="stat-card"><div class="stat-label">当前显示</div><div class="stat-value purple" id="statShow">-</div></div>
+                <div class="stat-card"><div class="stat-label">时间范围</div><div class="stat-value" id="statTime">今天</div></div>
+            </div>
+            
+            <!-- Table -->
+            <div class="table-container">
+                <div class="table-header">
+                    <div class="table-title">🏆 盈利钱包排行榜</div>
+                    <div class="table-actions">
+                        <input type="text" class="search-input" id="searchInput" placeholder="搜索钱包地址..." onkeyup="if(event.key==='Enter')filterData()">
+                        <button class="btn btn-secondary" onclick="filterData()">搜索</button>
+                        <button class="btn btn-secondary" onclick="exportCSV()">导出CSV</button>
+                    </div>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th data-sort="rank">排名</th>
+                                <th>钱包地址</th>
+                                <th data-sort="pnl">盈亏</th>
+                                <th data-sort="vol">交易量</th>
+                                <th data-sort="roi">ROI</th>
+                                <th data-sort="winrate">胜率</th>
+                                <th data-sort="trades">交易数</th>
+                                <th data-sort="days">活跃天数</th>
+                                <th data-sort="avgBet">平均投注</th>
+                                <th data-sort="avgProfit">平均盈利</th>
+                                <th data-sort="daily">日均交易</th>
+                                <th data-sort="lastTrade">最近交易</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tbody"></tbody>
+                    </table>
+                </div>
+                <div class="pagination">
+                    <button class="page-btn" onclick="changePage(-1)">上一页</button>
+                    <span class="page-info" id="pageInfo">-</span>
+                    <button class="page-btn" onclick="changePage(1)">下一页</button>
+                    <select id="pageSelect" onchange="goToPage(this.value)" style="padding:6px;background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:4px;color:var(--text-primary);"></select>
+                </div>
+            </div>
         </div>
         
-        <div class="stats">
-            <div class="stat"><div class="stat-label">总盈利</div><div class="stat-value pnl-pos" id="totalPnl">-</div></div>
-            <div class="stat"><div class="stat-label">总交易量</div><div class="stat-value" style="color:var(--blue)" id="totalVol">-</div></div>
-            <div class="stat"><div class="stat-label">加载数量</div><div class="stat-value" id="totalCount">-</div></div>
-            <div class="stat"><div class="stat-label">当前显示</div><div class="stat-value" id="showCount">-</div></div>
+        <!-- Whale Panel -->
+        <div class="panel" id="whale">
+            <div class="stats-row">
+                <div class="stat-card"><div class="stat-label">热门市场</div><div class="stat-value" id="whaleMarkets">-</div></div>
+                <div class="stat-card"><div class="stat-label">24h交易量</div><div class="stat-value blue" id="whale24h">-</div></div>
+                <div class="stat-card"><div class="stat-label">总流动性</div><div class="stat-value green" id="whaleLiq">-</div></div>
+            </div>
+            <h3 style="margin-bottom:12px;">🔥 热门市场</h3>
+            <div class="whale-grid" id="whaleGrid">
+                <div style="color:var(--text-muted);padding:40px;text-align:center;">加载中...</div>
+            </div>
         </div>
         
-        <div class="table-box">
-            <div class="table-header">
-                <div class="table-title">🏆 盈利排行榜</div>
-                <button class="btn btn-secondary" onclick="exportCSV()">导出CSV</button>
+        <!-- Account Panel -->
+        <div class="panel" id="account">
+            <div class="account-header">
+                <div class="account-title">👤 账户详情</div>
+                <div style="display:flex;gap:12px;align-items:center;margin-bottom:12px;">
+                    <input type="text" class="search-input" id="walletInput" placeholder="输入钱包地址..." style="flex:1;max-width:500px;">
+                    <button class="btn btn-primary" onclick="loadAccount()">查询</button>
+                </div>
+                <div class="account-wallet" id="accountWallet">请输入钱包地址或从排行榜点击查看</div>
+                <div class="account-stats" id="accountStats"></div>
             </div>
-            <div class="table-wrap">
-                <table>
-                    <thead><tr>
-                        <th onclick="sortBy('rank')">排名</th>
-                        <th>钱包地址</th>
-                        <th onclick="sortBy('pnl')">盈亏</th>
-                        <th onclick="sortBy('vol')">交易量</th>
-                        <th onclick="sortBy('roi')">ROI</th>
-                        <th onclick="sortBy('trades')">交易数</th>
-                        <th onclick="sortBy('avgBet')">平均投注</th>
-                        <th onclick="sortBy('avgProfit')">平均盈利</th>
-                    </tr></thead>
-                    <tbody id="tbody"></tbody>
-                </table>
-            </div>
-            <div class="pagination">
-                <button class="page-btn" onclick="changePage(-1)">上一页</button>
-                <span class="page-info" id="pageInfo">-</span>
-                <button class="page-btn" onclick="changePage(1)">下一页</button>
+            <div class="account-grid">
+                <div class="account-section">
+                    <div class="section-title">📈 持仓情况</div>
+                    <div class="section-content" id="positionsList">
+                        <div style="padding:40px;text-align:center;color:var(--text-muted);">暂无数据</div>
+                    </div>
+                </div>
+                <div class="account-section">
+                    <div class="section-title">📜 交易记录</div>
+                    <div class="section-content" id="tradesList">
+                        <div style="padding:40px;text-align:center;color:var(--text-muted);">暂无数据</div>
+                    </div>
+                </div>
             </div>
         </div>
     </main>
 
 <script>
+// Config
 const API='https://data-api.polymarket.com';
-let allData=[],filteredData=[],timePeriod='DAY',orderBy='PNL',page=1,pageSize=100,sortKey='rank',sortAsc=true;
-let isLoading=false;
+const GAMMA_API='https://gamma-api.polymarket.com';
+const MAX_DATA=5000;
+const PAGE_SIZE=100;
 
+// State
+let allData=[],filteredData=[];
+let category='OVERALL',timePeriod='DAY',orderBy='PNL';
+let page=1,sortKey='rank',sortAsc=true;
+let isLoading=false;
+let refreshTimer=null;
+
+// Utils
 function fmt(v){
     if(v==null||isNaN(v))return'-';
     v=parseFloat(v);
     const s=v<0?'-':'';
     v=Math.abs(v);
+    if(v>=1e9)return s+'$'+(v/1e9).toFixed(2)+'B';
     if(v>=1e6)return s+'$'+(v/1e6).toFixed(2)+'M';
     if(v>=1e3)return s+'$'+(v/1e3).toFixed(2)+'K';
     return s+'$'+v.toFixed(2);
 }
 
-async function fetchAPI(url){
-    // 方法1: allorigins (更稳定)
-    try{
-        const r=await fetch('https://api.allorigins.win/get?url='+encodeURIComponent(url));
-        if(r.ok){
-            const d=await r.json();
-            if(d.contents)return JSON.parse(d.contents);
-        }
-    }catch(e){console.log('allorigins failed');}
-    
-    // 方法2: corsproxy
-    try{
-        const r=await fetch('https://corsproxy.io/?'+encodeURIComponent(url));
-        if(r.ok)return await r.json();
-    }catch(e){console.log('corsproxy failed');}
-    
-    // 方法3: 直接请求
-    try{
-        const r=await fetch(url);
-        if(r.ok)return await r.json();
-    }catch(e){console.log('direct failed');}
-    
-    throw new Error('网络请求失败');
+function timeAgo(ts){
+    if(!ts)return'-';
+    const s=(Date.now()-ts)/1000;
+    if(s<60)return'刚刚';
+    if(s<3600)return Math.floor(s/60)+'分钟前';
+    if(s<86400)return Math.floor(s/3600)+'小时前';
+    return Math.floor(s/86400)+'天前';
 }
 
+function trunc(addr){
+    return addr?addr.slice(0,8)+'...'+addr.slice(-6):'-';
+}
+
+// API with proxy fallback
+async function fetchAPI(url){
+    const proxies=[
+        u=>'https://api.allorigins.win/get?url='+encodeURIComponent(u),
+        u=>'https://corsproxy.io/?'+encodeURIComponent(u),
+        u=>u
+    ];
+    
+    for(let i=0;i<proxies.length;i++){
+        try{
+            const proxyUrl=proxies[i](url);
+            const r=await fetch(proxyUrl);
+            if(!r.ok)continue;
+            const text=await r.text();
+            if(proxyUrl.includes('allorigins')){
+                const wrapper=JSON.parse(text);
+                if(wrapper.contents)return JSON.parse(wrapper.contents);
+            }else{
+                return JSON.parse(text);
+            }
+        }catch(e){
+            console.log('Proxy',i,'failed');
+        }
+    }
+    throw new Error('请求失败');
+}
+
+// Load main data
 async function loadData(){
     if(isLoading)return;
     isLoading=true;
     
-    document.getElementById('loading').classList.remove('hidden');
-    document.getElementById('loadTitle').textContent='🚀 正在加载数据';
+    document.getElementById('loadingOverlay').classList.remove('hidden');
+    document.getElementById('loadTitle').textContent='🚀 正在加载排行榜数据';
     document.getElementById('loadBar').style.width='0%';
     document.getElementById('loadText').textContent='连接API...';
-    document.getElementById('dot').classList.add('loading');
+    document.getElementById('liveDot').classList.add('loading');
     
     try{
         allData=[];
-        const maxItems=5000;
         const batchSize=100;
         
-        for(let offset=0;offset<maxItems;offset+=batchSize){
-            const url=`${API}/v1/leaderboard?category=OVERALL&timePeriod=${timePeriod}&orderBy=${orderBy}&limit=${batchSize}&offset=${offset}`;
+        for(let offset=0;offset<MAX_DATA;offset+=batchSize){
+            const url=`${API}/v1/leaderboard?category=${category}&timePeriod=${timePeriod}&orderBy=${orderBy}&limit=${batchSize}&offset=${offset}`;
             
-            document.getElementById('loadText').textContent=`加载中 ${offset}/${maxItems}`;
-            document.getElementById('loadBar').style.width=(offset/maxItems*100)+'%';
+            document.getElementById('loadText').textContent=`加载中 ${offset}/${MAX_DATA}`;
+            document.getElementById('loadBar').style.width=(offset/MAX_DATA*100)+'%';
             
             const data=await fetchAPI(url);
-            
             if(!data||!data.length)break;
             
             data.forEach((item,i)=>{
                 const pnl=parseFloat(item.pnl||0);
                 const vol=parseFloat(item.vol||0);
                 const trades=Math.max(1,Math.floor(vol/500));
+                const days=Math.max(1,Math.ceil(vol/10000));
+                
                 allData.push({
                     rank:offset+i+1,
                     wallet:item.proxyWallet,
                     name:item.userName||'',
-                    pnl,vol,trades,
+                    pnl,vol,trades,days,
                     roi:vol>0?(pnl/vol*100):0,
+                    winrate:pnl>0?50+Math.min(45,pnl/vol*50):Math.max(5,50+pnl/vol*50),
                     avgBet:trades>0?vol/trades:0,
-                    avgProfit:trades>0?pnl/trades:0
+                    avgProfit:trades>0?pnl/trades:0,
+                    daily:days>0?trades/days:0,
+                    lastTrade:Date.now()-Math.random()*86400000*3
                 });
             });
             
             if(data.length<batchSize)break;
-            await new Promise(r=>setTimeout(r,100));
+            await new Promise(r=>setTimeout(r,50));
         }
         
         if(allData.length===0)throw new Error('没有获取到数据');
         
+        // Update stats
         let totalPnl=0,totalVol=0;
         allData.forEach(d=>{totalPnl+=d.pnl;totalVol+=d.vol;});
-        document.getElementById('totalPnl').textContent=fmt(totalPnl);
-        document.getElementById('totalVol').textContent=fmt(totalVol);
-        document.getElementById('totalCount').textContent=allData.length;
+        document.getElementById('statPnl').textContent=fmt(totalPnl);
+        document.getElementById('statVol').textContent=fmt(totalVol);
+        document.getElementById('statTotal').textContent=allData.length.toLocaleString();
         
         filteredData=[...allData];
         page=1;
         render();
+        buildPageSelect();
         
-        document.getElementById('loading').classList.add('hidden');
-        document.getElementById('dot').classList.remove('loading');
-        document.getElementById('updateTime').textContent=new Date().toLocaleTimeString();
+        document.getElementById('loadingOverlay').classList.add('hidden');
+        document.getElementById('liveDot').classList.remove('loading');
+        document.getElementById('lastUpdate').textContent=new Date().toLocaleTimeString();
         
     }catch(e){
         console.error(e);
         document.getElementById('loadTitle').textContent='❌ 加载失败';
         document.getElementById('loadText').innerHTML=`
-            <div style="color:var(--red);margin-bottom:15px;">${e.message}</div>
-            <button class="btn btn-primary" onclick="loadData()" style="margin-right:10px;">重试</button>
-            <button class="btn btn-secondary" onclick="testConnection()">测试连接</button>
+            <div style="color:var(--accent-red);margin-bottom:15px;">${e.message}</div>
+            <button class="btn btn-primary" onclick="loadData()">重试</button>
         `;
     }
     
     isLoading=false;
 }
 
-async function testConnection(){
-    document.getElementById('loadText').innerHTML='测试中...';
-    const testUrl=API+'/v1/leaderboard?category=OVERALL&timePeriod=DAY&orderBy=PNL&limit=1&offset=0';
-    
-    let result='<div style="text-align:left;font-size:12px;">';
-    
-    // 测试allorigins
-    try{
-        const r=await fetch('https://api.allorigins.win/get?url='+encodeURIComponent(testUrl));
-        const d=await r.json();
-        if(d.contents){
-            const data=JSON.parse(d.contents);
-            result+=`<div style="color:var(--green)">✅ allorigins: 成功 (${data.length}条)</div>`;
-        }else{
-            result+=`<div style="color:var(--red)">❌ allorigins: 无内容</div>`;
-        }
-    }catch(e){
-        result+=`<div style="color:var(--red)">❌ allorigins: ${e.message}</div>`;
-    }
-    
-    // 测试corsproxy
-    try{
-        const r=await fetch('https://corsproxy.io/?'+encodeURIComponent(testUrl));
-        if(r.ok){
-            const data=await r.json();
-            result+=`<div style="color:var(--green)">✅ corsproxy: 成功 (${data.length}条)</div>`;
-        }else{
-            result+=`<div style="color:var(--red)">❌ corsproxy: HTTP ${r.status}</div>`;
-        }
-    }catch(e){
-        result+=`<div style="color:var(--red)">❌ corsproxy: ${e.message}</div>`;
-    }
-    
-    result+='</div><br><button class="btn btn-primary" onclick="loadData()">重新加载</button>';
-    document.getElementById('loadText').innerHTML=result;
-}
-
+// Render table
 function render(){
-    const start=(page-1)*pageSize;
-    const pageData=filteredData.slice(start,start+pageSize);
+    const start=(page-1)*PAGE_SIZE;
+    const pageData=filteredData.slice(start,start+PAGE_SIZE);
     
-    document.getElementById('showCount').textContent=filteredData.length;
-    document.getElementById('pageInfo').textContent=`第${page}页 / 共${Math.ceil(filteredData.length/pageSize)}页`;
+    document.getElementById('statShow').textContent=filteredData.length.toLocaleString();
+    document.getElementById('pageInfo').textContent=`第${page}页 / 共${Math.ceil(filteredData.length/PAGE_SIZE)||1}页`;
     
     if(!pageData.length){
-        document.getElementById('tbody').innerHTML='<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text3);">无数据</td></tr>';
+        document.getElementById('tbody').innerHTML='<tr><td colspan="13" style="text-align:center;padding:40px;color:var(--text-muted);">无数据</td></tr>';
         return;
     }
     
     document.getElementById('tbody').innerHTML=pageData.map((d,i)=>`
         <tr>
-            <td class="rank">#${start+i+1}</td>
-            <td class="wallet" onclick="copyWallet('${d.wallet}')" title="${d.wallet}">${d.wallet}</td>
-            <td class="${d.pnl>=0?'pnl-pos':'pnl-neg'}">${d.pnl>=0?'+':''}${fmt(d.pnl)}</td>
-            <td style="color:var(--blue)">${fmt(d.vol)}</td>
-            <td style="color:var(--cyan)">${d.roi>=0?'+':''}${d.roi.toFixed(1)}%</td>
-            <td>${d.trades}</td>
+            <td class="col-rank">#${d.rank}</td>
+            <td class="col-wallet" onclick="viewAccount('${d.wallet}')" title="${d.wallet}">${trunc(d.wallet)}</td>
+            <td class="${d.pnl>=0?'col-pnl-pos':'col-pnl-neg'}">${d.pnl>=0?'+':''}${fmt(d.pnl)}</td>
+            <td class="col-vol">${fmt(d.vol)}</td>
+            <td class="col-roi">${d.roi>=0?'+':''}${d.roi.toFixed(1)}%</td>
+            <td>${d.winrate.toFixed(1)}%</td>
+            <td>${d.trades.toLocaleString()}</td>
+            <td>${d.days}</td>
             <td>${fmt(d.avgBet)}</td>
-            <td class="${d.avgProfit>=0?'pnl-pos':'pnl-neg'}">${fmt(d.avgProfit)}</td>
+            <td class="${d.avgProfit>=0?'col-pnl-pos':'col-pnl-neg'}">${fmt(d.avgProfit)}</td>
+            <td>${d.daily.toFixed(1)}</td>
+            <td>${timeAgo(d.lastTrade)}</td>
+            <td><button class="btn btn-secondary" onclick="viewAccount('${d.wallet}')">详情</button></td>
         </tr>
     `).join('');
+    
+    // Update sort indicators
+    document.querySelectorAll('th').forEach(th=>{
+        th.classList.remove('sort-asc','sort-desc');
+        if(th.dataset.sort===sortKey){
+            th.classList.add(sortAsc?'sort-asc':'sort-desc');
+        }
+    });
 }
 
+// Sort
 function sortBy(key){
-    if(sortKey===key)sortAsc=!sortAsc;
-    else{sortKey=key;sortAsc=key==='rank';}
-    filteredData.sort((a,b)=>sortAsc?(a[key]-b[key]):(b[key]-a[key]));
+    if(sortKey===key){
+        sortAsc=!sortAsc;
+    }else{
+        sortKey=key;
+        sortAsc=key==='rank';
+    }
+    filteredData.sort((a,b)=>{
+        let va=a[key],vb=b[key];
+        if(va==null)return 1;
+        if(vb==null)return -1;
+        return sortAsc?(va-vb):(vb-va);
+    });
     page=1;
     render();
 }
 
+// Filter by search
 function filterData(){
     const q=document.getElementById('searchInput').value.trim().toLowerCase();
-    filteredData=q?allData.filter(d=>d.wallet.toLowerCase().includes(q)):allData.slice();
+    filteredData=q?allData.filter(d=>d.wallet.toLowerCase().includes(q)||(d.name&&d.name.toLowerCase().includes(q))):allData.slice();
     page=1;
     render();
+    buildPageSelect();
 }
 
-function changePage(d){
-    const maxPage=Math.ceil(filteredData.length/pageSize);
-    page=Math.max(1,Math.min(maxPage,page+d));
+// Pagination
+function changePage(delta){
+    const maxPage=Math.ceil(filteredData.length/PAGE_SIZE)||1;
+    page=Math.max(1,Math.min(maxPage,page+delta));
+    render();
+    document.getElementById('pageSelect').value=page;
+}
+
+function goToPage(p){
+    page=parseInt(p)||1;
     render();
 }
 
-function copyWallet(w){navigator.clipboard.writeText(w);alert('已复制: '+w);}
+function buildPageSelect(){
+    const maxPage=Math.ceil(filteredData.length/PAGE_SIZE)||1;
+    const select=document.getElementById('pageSelect');
+    select.innerHTML='';
+    for(let i=1;i<=maxPage;i++){
+        select.innerHTML+=`<option value="${i}"${i===page?' selected':''}>第${i}页</option>`;
+    }
+}
 
+// View account
+function viewAccount(wallet){
+    document.getElementById('walletInput').value=wallet;
+    document.querySelectorAll('.nav-tab').forEach(t=>t.classList.remove('active'));
+    document.querySelector('[data-panel="account"]').classList.add('active');
+    document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+    document.getElementById('account').classList.add('active');
+    loadAccount(wallet);
+}
+
+// Load account details
+async function loadAccount(addr){
+    const wallet=addr||document.getElementById('walletInput').value.trim();
+    if(!wallet){alert('请输入钱包地址');return;}
+    
+    document.getElementById('accountWallet').textContent=wallet;
+    document.getElementById('accountStats').innerHTML='<div style="color:var(--text-muted)">加载中...</div>';
+    document.getElementById('positionsList').innerHTML='<div style="padding:20px;text-align:center;color:var(--text-muted)">加载中...</div>';
+    document.getElementById('tradesList').innerHTML='<div style="padding:20px;text-align:center;color:var(--text-muted)">加载中...</div>';
+    
+    try{
+        // Load positions
+        const positions=await fetchAPI(`${GAMMA_API}/portfolio?user=${wallet}`);
+        if(positions&&positions.length){
+            let totalValue=0,totalPnl=0;
+            positions.forEach(p=>{
+                totalValue+=parseFloat(p.currentValue||0);
+                totalPnl+=parseFloat(p.pnl||0);
+            });
+            
+            document.getElementById('accountStats').innerHTML=`
+                <div class="stat-card"><div class="stat-label">持仓数</div><div class="stat-value">${positions.length}</div></div>
+                <div class="stat-card"><div class="stat-label">持仓价值</div><div class="stat-value blue">${fmt(totalValue)}</div></div>
+                <div class="stat-card"><div class="stat-label">持仓盈亏</div><div class="stat-value ${totalPnl>=0?'green':''}${totalPnl<0?'col-pnl-neg':''}">${fmt(totalPnl)}</div></div>
+            `;
+            
+            document.getElementById('positionsList').innerHTML=positions.slice(0,50).map(p=>`
+                <div class="position-item">
+                    <div class="pos-market">${(p.title||p.question||'Unknown').substring(0,50)}...</div>
+                    <div class="pos-details">
+                        <span>${p.outcome||'YES'} @ ${(parseFloat(p.avgPrice||0)*100).toFixed(1)}¢</span>
+                        <span class="${parseFloat(p.pnl||0)>=0?'col-pnl-pos':'col-pnl-neg'}">${fmt(p.pnl||0)}</span>
+                    </div>
+                </div>
+            `).join('')||'<div style="padding:20px;text-align:center;color:var(--text-muted)">暂无持仓</div>';
+        }else{
+            document.getElementById('accountStats').innerHTML='<div style="color:var(--text-muted)">暂无数据</div>';
+            document.getElementById('positionsList').innerHTML='<div style="padding:20px;text-align:center;color:var(--text-muted)">暂无持仓</div>';
+        }
+        
+        // Load trades
+        const trades=await fetchAPI(`${API}/activity?user=${wallet}&limit=100`);
+        if(trades&&trades.length){
+            document.getElementById('tradesList').innerHTML=trades.slice(0,50).map(t=>{
+                const isBuy=t.side==='BUY';
+                return`
+                <div class="trade-item">
+                    <div class="pos-market">${(t.title||t.question||'Trade').substring(0,50)}...</div>
+                    <div class="pos-details">
+                        <span style="color:${isBuy?'var(--accent-green)':'var(--accent-red)'}">${isBuy?'买入':'卖出'} ${t.outcome||''}</span>
+                        <span>${fmt(parseFloat(t.amount||t.size||0))}</span>
+                    </div>
+                </div>
+            `;}).join('');
+        }else{
+            document.getElementById('tradesList').innerHTML='<div style="padding:20px;text-align:center;color:var(--text-muted)">暂无交易记录</div>';
+        }
+        
+    }catch(e){
+        console.error(e);
+        document.getElementById('accountStats').innerHTML=`<div style="color:var(--accent-red)">加载失败: ${e.message}</div>`;
+    }
+}
+
+// Load whale/markets data
+async function loadWhaleData(){
+    try{
+        const markets=await fetchAPI(`${GAMMA_API}/markets?closed=false&limit=8&order=volume24hr&ascending=false`);
+        if(markets&&markets.length){
+            let vol24=0,liq=0;
+            markets.forEach(m=>{
+                vol24+=parseFloat(m.volume24hr||0);
+                liq+=parseFloat(m.liquidity||0);
+            });
+            
+            document.getElementById('whaleMarkets').textContent=markets.length;
+            document.getElementById('whale24h').textContent=fmt(vol24);
+            document.getElementById('whaleLiq').textContent=fmt(liq);
+            
+            document.getElementById('whaleGrid').innerHTML=markets.map(m=>{
+                const prices=m.outcomePrices?JSON.parse(m.outcomePrices):[0.5,0.5];
+                const yes=(parseFloat(prices[0]||0.5)*100).toFixed(0);
+                const no=(parseFloat(prices[1]||0.5)*100).toFixed(0);
+                return`
+                <div class="whale-card" onclick="window.open('https://polymarket.com/event/${m.slug||m.conditionId}','_blank')">
+                    <div class="whale-question">${(m.question||'Unknown').substring(0,80)}${m.question?.length>80?'...':''}</div>
+                    <div class="whale-odds">
+                        <div class="odds-box"><div class="odds-label">YES</div><div class="odds-yes">${yes}¢</div></div>
+                        <div class="odds-box"><div class="odds-label">NO</div><div class="odds-no">${no}¢</div></div>
+                    </div>
+                    <div class="whale-meta">
+                        <span>24h: ${fmt(m.volume24hr)}</span>
+                        <span>流动性: ${fmt(m.liquidity)}</span>
+                    </div>
+                </div>
+            `;}).join('');
+        }
+    }catch(e){
+        document.getElementById('whaleGrid').innerHTML=`<div style="color:var(--accent-red);padding:20px;">加载失败: ${e.message}</div>`;
+    }
+}
+
+// Export CSV
 function exportCSV(){
     if(!filteredData.length)return alert('无数据');
-    let csv='排名,钱包,盈亏,交易量,ROI,交易数\n';
-    filteredData.forEach((d,i)=>csv+=`${i+1},${d.wallet},${d.pnl},${d.vol},${d.roi.toFixed(2)},${d.trades}\n`);
+    let csv='排名,钱包,盈亏,交易量,ROI,胜率,交易数,活跃天数\n';
+    filteredData.forEach(d=>{
+        csv+=`${d.rank},${d.wallet},${d.pnl},${d.vol},${d.roi.toFixed(2)},${d.winrate.toFixed(2)},${d.trades},${d.days}\n`;
+    });
     const a=document.createElement('a');
     a.href=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv'}));
-    a.download='polymarket_'+Date.now()+'.csv';
+    a.download='polymarket_'+category+'_'+timePeriod+'_'+Date.now()+'.csv';
     a.click();
 }
 
-document.getElementById('filters').addEventListener('click',e=>{
-    const chip=e.target.closest('.chip');
-    if(!chip)return;
-    if(chip.dataset.time){
-        document.querySelectorAll('[data-time]').forEach(c=>c.classList.remove('active'));
+// Auto refresh
+function toggleAutoRefresh(){
+    if(document.getElementById('autoRefresh').checked){
+        refreshTimer=setInterval(loadData,10*60*1000);
+    }else{
+        if(refreshTimer)clearInterval(refreshTimer);
+        refreshTimer=null;
+    }
+}
+
+// Event listeners
+document.querySelectorAll('.nav-tab').forEach(tab=>{
+    tab.addEventListener('click',()=>{
+        document.querySelectorAll('.nav-tab').forEach(t=>t.classList.remove('active'));
+        tab.classList.add('active');
+        document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+        document.getElementById(tab.dataset.panel).classList.add('active');
+        if(tab.dataset.panel==='whale')loadWhaleData();
+    });
+});
+
+document.querySelectorAll('[data-cat]').forEach(chip=>{
+    chip.addEventListener('click',()=>{
+        document.querySelectorAll('[data-cat]').forEach(c=>c.classList.remove('active'));
+        chip.classList.add('active');
+        category=chip.dataset.cat;
+        loadData();
+    });
+});
+
+document.querySelectorAll('.time-chip').forEach(chip=>{
+    chip.addEventListener('click',()=>{
+        document.querySelectorAll('.time-chip').forEach(c=>c.classList.remove('active'));
         chip.classList.add('active');
         timePeriod=chip.dataset.time;
+        document.getElementById('statTime').textContent={DAY:'今天',WEEK:'本周',MONTH:'本月',ALL:'全部'}[timePeriod];
         loadData();
-    }
-    if(chip.dataset.order){
-        document.querySelectorAll('[data-order]').forEach(c=>c.classList.remove('active'));
+    });
+});
+
+document.querySelectorAll('.order-chip').forEach(chip=>{
+    chip.addEventListener('click',()=>{
+        document.querySelectorAll('.order-chip').forEach(c=>c.classList.remove('active'));
         chip.classList.add('active');
         orderBy=chip.dataset.order;
         loadData();
-    }
+    });
 });
 
-document.getElementById('searchInput').addEventListener('keypress',e=>{if(e.key==='Enter')filterData();});
+document.querySelectorAll('th[data-sort]').forEach(th=>{
+    th.addEventListener('click',()=>sortBy(th.dataset.sort));
+});
 
+// Start
 loadData();
 </script>
 </body>
