@@ -470,6 +470,25 @@ async function initWithCache(){
     if(cache&&cache.data&&cache.data.length>0){
         // 有缓存，直接显示
         allData=cache.data;
+        
+        // 恢复detailCache
+        allData.forEach(u=>{
+            if(u.trades!==null||u.positions!==null){
+                detailCache[u.proxyWallet]={
+                    balance:u.balance,
+                    positions:u.positions,
+                    trades:u.trades,
+                    days:u.days,
+                    invested:u.invested,
+                    roi:u.roi,
+                    winrate:u.winrate,
+                    avgbet:u.avgbet,
+                    avgprofit:u.avgprofit,
+                    daily:u.daily
+                };
+            }
+        });
+        
         updateStats();
         currentSortKey='rank';
         currentSortAsc=true;
@@ -478,6 +497,13 @@ async function initWithCache(){
         
         const cacheTimeStr=new Date(cache.time).toLocaleTimeString();
         document.getElementById('lastUpdate').textContent=cacheTimeStr+'(缓存)';
+        
+        // 检查是否有用户还没加载USDC余额
+        const needBalance=allData.filter(u=>u.balance===null||u.balance===undefined);
+        if(needBalance.length>0){
+            console.log(`继续后台加载 ${needBalance.length} 个用户的USDC余额...`);
+            silentLoadUSDCBalances(needBalance);
+        }
         
         // 如果缓存过期，后台静默更新
         if(cache.isExpired){
@@ -568,7 +594,8 @@ async function silentLoadUserDetails(dataArray){
                     api(`${DATA_API}/activity?user=${user.proxyWallet}&limit=1000`).catch(()=>[])
                 ]);
                 
-                const details=calculateUserStats(positions||[],trades||[]);
+                // 传入用户的pnl用于计算平均盈利
+                const details=calculateUserStats(positions||[],trades||[],user.pnl||0);
                 Object.assign(user,details);
                 detailCache[user.proxyWallet]=details;
             }catch(e){}
@@ -578,6 +605,46 @@ async function silentLoadUserDetails(dataArray){
             await new Promise(r=>setTimeout(r,50));
         }
     }
+    
+    // 后台继续加载USDC余额
+    silentLoadUSDCBalances(dataArray);
+}
+
+// 后台静默加载USDC余额
+async function silentLoadUSDCBalances(dataArray){
+    const batchSize=5;
+    
+    for(let i=0;i<dataArray.length;i+=batchSize){
+        const batch=dataArray.slice(i,i+batchSize);
+        
+        await Promise.all(batch.map(async(user)=>{
+            // 如果已有余额，跳过
+            if(user.balance!==null&&user.balance!==undefined)return;
+            
+            try{
+                const balance=await fetchUSDCBalance(user.proxyWallet);
+                if(balance!==null){
+                    user.balance=balance;
+                    if(detailCache[user.proxyWallet]){
+                        detailCache[user.proxyWallet].balance=balance;
+                    }
+                }
+            }catch(e){}
+        }));
+        
+        // 每100个更新一次显示
+        if((i+batchSize)%100===0){
+            renderLeaderboard();
+        }
+        
+        if(i+batchSize<dataArray.length){
+            await new Promise(r=>setTimeout(r,200));
+        }
+    }
+    
+    // 完成后保存和刷新
+    setCache(allData);
+    renderLeaderboard();
 }
 
 // 获取排行榜数据（纯数据获取，不更新UI）
@@ -728,13 +795,13 @@ async function loadAllUserDetails(){
         
         await Promise.all(batch.map(async(user)=>{
             try{
-                // 加载持仓和交易（交易只取前500条用于快速统计）
                 const [positions,trades]=await Promise.all([
                     api(`${DATA_API}/positions?user=${user.proxyWallet}&sizeThreshold=0`).catch(()=>[]),
                     api(`${DATA_API}/activity?user=${user.proxyWallet}&limit=1000`).catch(()=>[])
                 ]);
                 
-                const details=calculateUserStats(positions||[],trades||[]);
+                // 传入用户的pnl用于计算平均盈利
+                const details=calculateUserStats(positions||[],trades||[],user.pnl||0);
                 Object.assign(user,details);
                 detailCache[user.proxyWallet]=details;
             }catch(e){}
@@ -748,6 +815,89 @@ async function loadAllUserDetails(){
         if(i+batchSize<allData.length){
             await new Promise(r=>setTimeout(r,50));
         }
+    }
+    
+    // 详情加载完成后，启动后台USDC余额加载
+    loadAllUSDCBalancesInBackground();
+}
+
+// 后台加载所有用户USDC余额（不阻塞前端）
+async function loadAllUSDCBalancesInBackground(){
+    console.log('开始后台加载USDC余额...');
+    const batchSize=5; // 每批5个，降低RPC压力
+    let loaded=0;
+    
+    for(let i=0;i<allData.length;i+=batchSize){
+        const batch=allData.slice(i,i+batchSize);
+        
+        await Promise.all(batch.map(async(user)=>{
+            try{
+                const balance=await fetchUSDCBalance(user.proxyWallet);
+                if(balance!==null){
+                    user.balance=balance;
+                    // 更新缓存
+                    if(detailCache[user.proxyWallet]){
+                        detailCache[user.proxyWallet].balance=balance;
+                    }
+                }
+            }catch(e){}
+        }));
+        
+        loaded+=batch.length;
+        
+        // 每加载100个用户，更新一次显示
+        if(loaded%100===0||loaded===allData.length){
+            // 保存缓存
+            setCache(allData);
+            // 刷新当前页显示
+            renderLeaderboard();
+            console.log(`USDC余额加载进度: ${loaded}/${allData.length}`);
+        }
+        
+        // 延迟避免RPC限流
+        if(i+batchSize<allData.length){
+            await new Promise(r=>setTimeout(r,200));
+        }
+    }
+    
+    console.log('USDC余额加载完成');
+    // 最终保存
+    setCache(allData);
+    renderLeaderboard();
+}
+
+// 获取单个地址的USDC余额
+async function fetchUSDCBalance(addr){
+    try{
+        const usdceAddr='0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
+        const rpcUrl='https://polygon-rpc.com';
+        const data={
+            jsonrpc:'2.0',
+            method:'eth_call',
+            params:[{
+                to:usdceAddr,
+                data:'0x70a08231000000000000000000000000'+addr.slice(2).toLowerCase()
+            },'latest'],
+            id:1
+        };
+        
+        for(let proxy of ['https://corsproxy.io/?','https://api.allorigins.win/raw?url=']){
+            try{
+                const resp=await fetch(proxy+encodeURIComponent(rpcUrl),{
+                    method:'POST',
+                    headers:{'Content-Type':'application/json'},
+                    body:JSON.stringify(data)
+                });
+                const result=await resp.json();
+                if(result.result&&result.result!=='0x'&&result.result!=='0x0'){
+                    return parseInt(result.result,16)/1e6;
+                }
+                return 0; // 余额为0
+            }catch(e){}
+        }
+        return null;
+    }catch(e){
+        return null;
     }
 }
 
@@ -921,6 +1071,10 @@ function renderLeaderboard(){
         const fmtPct=(v)=>v===null||v===undefined?'-':(v>=0?'+':'')+v.toFixed(1)+'%';
         const fmtNum=(v)=>v===null||v===undefined?'-':v.toLocaleString();
         
+        // 平均盈利带颜色
+        const avgProfitHtml=t.avgprofit===null||t.avgprofit===undefined?'-':
+            `<span class="${t.avgprofit>=0?'col-pnl-pos':'col-pnl-neg'}">${t.avgprofit>=0?'+':''}${fmt$(t.avgprofit)}</span>`;
+        
         return`<tr data-wallet="${t.proxyWallet}">
             <td class="col-rank">#${displayRank}</td>
             <td><a href="javascript:void(0)" onclick="loadAccount('${t.proxyWallet}')" class="wallet-link" title="${t.proxyWallet}">${t.proxyWallet}</a></td>
@@ -931,7 +1085,7 @@ function renderLeaderboard(){
             <td class="col-positions">${fmtVal(t.positions,fmt$)}</td>
             <td class="col-trades">${fmtNum(t.trades)}</td>
             <td class="col-avgbet">${fmtVal(t.avgbet,fmt$)}</td>
-            <td class="col-avgprofit">${fmtVal(t.avgprofit,fmt$)}</td>
+            <td>${avgProfitHtml}</td>
             <td class="col-invested">${fmtVal(t.invested,fmt$)}</td>
             <td>${t.days===null||t.days===undefined?'-':t.days}</td>
             <td>${t.daily===null||t.daily===undefined?'-':t.daily.toFixed(1)}</td>
@@ -970,16 +1124,19 @@ async function loadUserDetails(wallet){
             api(`${DATA_API}/activity?user=${wallet}&limit=1000`).catch(()=>[])
         ]);
         
-        // 计算统计数据
-        const details=calculateUserStats(positions||[],trades||[]);
+        // 找到用户的pnl
+        const userData=allData.find(t=>t.proxyWallet===wallet);
+        const userPnl=userData?userData.pnl:0;
+        
+        // 计算统计数据，传入pnl
+        const details=calculateUserStats(positions||[],trades||[],userPnl);
         detailCache[wallet]=details;
         
         // 更新表格行
         updateRowWithDetails(wallet,details);
         
         // 更新allData中的数据
-        const item=allData.find(t=>t.proxyWallet===wallet);
-        if(item)Object.assign(item,details);
+        if(userData)Object.assign(userData,details);
         
     }catch(e){
         console.error('加载详情失败:',wallet,e);
@@ -987,7 +1144,7 @@ async function loadUserDetails(wallet){
 }
 
 // 计算用户统计数据（与账户详情逻辑一致）
-function calculateUserStats(positions,trades){
+function calculateUserStats(positions,trades,userPnl=0){
     // 持仓统计
     let posValue=0,posInvested=0,posCount=positions.length;
     let profitPos=0,lossPos=0;
@@ -1037,8 +1194,11 @@ function calculateUserStats(positions,trades){
     const totalAmt=buyAmt+sellAmt;
     const days=tradeDays.size||1;
     
-    // 平均投注 = 买入总额 / 买入次数 (只计算买入)
+    // 平均投注 = 买入总额 / 买入次数
     const avgbet=buyCount>0?buyAmt/buyCount:0;
+    
+    // 平均盈利 = 用户总盈利 / 交易次数
+    const avgprofit=totalTrades>0?userPnl/totalTrades:0;
     
     // 从持仓计算ROI
     const roi=posInvested>0?((posValue-posInvested)/posInvested)*100:0;
@@ -1047,7 +1207,7 @@ function calculateUserStats(positions,trades){
     const winrate=posCount>0?(profitPos/posCount)*100:50;
     
     return{
-        balance:null, // USDC余额需要单独查询
+        balance:null, // USDC余额需要单独查询，排行榜不显示
         positions:posValue,
         trades:totalTrades,
         days,
@@ -1055,7 +1215,7 @@ function calculateUserStats(positions,trades){
         roi,
         winrate,
         avgbet,
-        avgprofit:null,
+        avgprofit,
         daily:days>0?totalTrades/days:0,
         buyCount,
         sellCount,
