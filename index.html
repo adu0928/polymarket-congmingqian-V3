@@ -69,8 +69,6 @@
         th { text-align: left; padding: 10px 12px; font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; background: var(--bg-tertiary); border-bottom: 1px solid var(--border-color); white-space: nowrap; position: sticky; top: 0; z-index: 10; cursor: pointer; user-select: none; transition: all 0.2s; }
         th:hover { color: var(--accent-purple); background: var(--bg-card); }
         th.sorted { color: var(--accent-purple); }
-        th.sort-1 { color: var(--accent-purple); background: var(--accent-purple-dim); }
-        th.sort-2 { color: var(--accent-cyan); background: rgba(34,211,238,0.1); }
         th .sort-icon { margin-left: 4px; opacity: 0.5; }
         th.sorted .sort-icon { opacity: 1; }
         td { padding: 10px 12px; font-size: 12px; border-bottom: 1px solid var(--border-color); white-space: nowrap; }
@@ -123,8 +121,6 @@
         .progress-text { font-size: 14px; color: var(--text-secondary); }
         .progress-count { font-family: 'JetBrains Mono', monospace; color: var(--accent-purple); font-size: 24px; font-weight: 600; margin: 10px 0; }
         .no-results { text-align: center; padding: 60px; color: var(--text-muted); }
-        .loading-text { color: var(--text-muted); font-style: italic; animation: blink 1s infinite; }
-        @keyframes blink { 0%,100%{opacity:1;} 50%{opacity:0.3;} }
         .data-info { font-size: 11px; color: var(--text-muted); padding: 4px 10px; background: var(--bg-tertiary); border-radius: 4px; }
         
         /* Account styles */
@@ -186,7 +182,7 @@
     <!-- Loading Overlay -->
     <div class="progress-overlay" id="loadingOverlay">
         <div class="progress-box">
-            <div class="progress-title" id="loadTitle">🚀 正在加载排行榜数据</div>
+            <div class="progress-title">🚀 正在加载排行榜数据</div>
             <div class="progress-count" id="loadCount">0 / 5000</div>
             <div class="progress-bar"><div class="progress-fill" id="loadProgress" style="width:0%"></div></div>
             <div class="progress-text" id="loadText">正在连接API...</div>
@@ -373,12 +369,12 @@
         </section>
     </main>
 <script>
-const PROXY='https://corsproxy.io/?',DATA_API='https://data-api.polymarket.com',GAMMA_API='https://gamma-api.polymarket.com';
+const DATA_API='https://data-api.polymarket.com',GAMMA_API='https://gamma-api.polymarket.com';
 const MAX_DATA=5000,PAGE_SIZE=100,TOTAL_PAGES=50,REFRESH_INTERVAL=10*60*1000; // 10分钟
 
 let category='OVERALL',timePeriod='DAY',orderBy='PNL',page=1,wallet='',minAmt=5000;
 let allData=[],filteredData=[];
-let sortKeys=[]; // 支持多列排序 [{key:'pnl',asc:false}, {key:'vol',asc:false}]
+let currentSortKey='rank',currentSortAsc=true;
 let allPositions=[],allTrades=[],posPage=1,txPage=1,itemsPerPage=100,globalPnl=0;
 let refreshTimer=null,countdownTimer=null,nextRefresh=0;
 
@@ -391,7 +387,32 @@ function fmtDate(ts){const d=parseTimestamp(ts);if(!d||isNaN(d.getTime())||d.get
 function fmtDateTime(ts){const d=parseTimestamp(ts);if(!d||isNaN(d.getTime())||d.getFullYear()<2000)return'-';return d.toLocaleString('zh-CN');}
 function timeAgo(ts){const d=parseTimestamp(ts);if(!d||isNaN(d.getTime())||d.getFullYear()<2000)return'-';const s=(Date.now()-d.getTime())/1000;if(s<60)return'刚刚';if(s<3600)return Math.floor(s/60)+'分钟前';if(s<86400)return Math.floor(s/3600)+'小时前';return Math.floor(s/86400)+'天前';}
 function trunc(a){return a?a.slice(0,10)+'...'+a.slice(-8):'-';}
-async function api(url){const r=await fetch(PROXY+encodeURIComponent(url));if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}
+
+// 多代理fallback机制
+const PROXIES=[
+    url=>'https://api.allorigins.win/get?url='+encodeURIComponent(url),
+    url=>'https://corsproxy.io/?'+encodeURIComponent(url),
+    url=>'https://api.codetabs.com/v1/proxy?quest='+encodeURIComponent(url)
+];
+async function api(url){
+    for(let i=0;i<PROXIES.length;i++){
+        try{
+            const proxyUrl=PROXIES[i](url);
+            const r=await fetch(proxyUrl);
+            if(!r.ok)continue;
+            const text=await r.text();
+            // allorigins返回wrapper格式
+            if(proxyUrl.includes('allorigins')){
+                const wrapper=JSON.parse(text);
+                if(wrapper.contents)return JSON.parse(wrapper.contents);
+            }
+            return JSON.parse(text);
+        }catch(e){
+            console.log('代理'+i+'失败:',e.message);
+        }
+    }
+    throw new Error('所有代理均失败');
+}
 
 // 初始化
 document.addEventListener('DOMContentLoaded',()=>{
@@ -445,15 +466,9 @@ async function loadAllLeaderboardData(){
         document.getElementById('statTotal').textContent=allData.length.toLocaleString();
         document.getElementById('dataInfo').textContent=`${allData.length}条数据`;
         
-        // 加载所有地址的真实活跃天数
-        document.getElementById('loadTitle').textContent='📊 正在计算活跃天数';
-        document.getElementById('loadCount').textContent='0 / '+allData.length;
-        document.getElementById('loadProgress').style.width='0%';
-        document.getElementById('loadText').textContent='正在获取交易记录计算活跃天数...';
-        await loadAllActiveDays();
-        
         // Apply filters and render
-        sortKeys=[{key:'rank',asc:true}]; // 默认按排名升序
+        currentSortKey='rank';
+        currentSortAsc=true;
         applyFiltersAndSort();
         
         showLoadingOverlay(false);
@@ -476,13 +491,8 @@ function enrichData(data,offset){
         const pnl=parseFloat(t.pnl||0);
         const vol=parseFloat(t.vol||0);
         const rank=parseInt(t.rank)||offset+i+1;
-        
-        // 根据交易量估算交易次数
         const trades=Math.max(1,Math.floor(vol/500));
-        
-        // 活跃天数: 先设为null，后续通过API获取真实数据
-        const days=null;
-        
+        const days=timePeriod==='DAY'?1:timePeriod==='WEEK'?7:timePeriod==='MONTH'?30:365;
         const invested=vol>0?vol*0.4:0;
         const roi=invested>0?(pnl/invested)*100:0;
         const winrate=pnl>0?50+Math.random()*40:20+Math.random()*30;
@@ -490,67 +500,11 @@ function enrichData(data,offset){
         const positions=Math.floor(Math.random()*20)+1;
         const avgbet=trades>0?vol/trades:0;
         const avgprofit=trades>0?pnl/trades:0;
-        const daily=null; // 依赖days
+        const daily=trades/days;
         const catKey=catKeys[Math.floor(Math.random()*catKeys.length)];
         const lastTime=Date.now()-Math.random()*86400000*3;
-        return{...t,rank,pnl,vol,trades,days,invested,roi,winrate,balance,positions,avgbet,avgprofit,daily,catKey,lastTime,daysLoaded:false};
+        return{...t,rank,pnl,vol,trades,days,invested,roi,winrate,balance,positions,avgbet,avgprofit,daily,catKey,lastTime};
     });
-}
-
-// 批量加载所有地址的真实活跃天数
-async function loadAllActiveDays(){
-    const total=allData.length;
-    let completed=0;
-    const BATCH_SIZE=50; // 并发数提高到50
-    
-    for(let i=0;i<total;i+=BATCH_SIZE){
-        const batch=allData.slice(i,i+BATCH_SIZE);
-        const promises=batch.map(async(t)=>{
-            try{
-                const days=await getActiveDays(t.proxyWallet);
-                t.days=days;
-                t.daily=days>0?t.trades/days:0;
-                t.daysLoaded=true;
-            }catch(e){
-                t.days=1;
-                t.daily=t.trades;
-            }
-        });
-        
-        await Promise.all(promises);
-        completed+=batch.length;
-        
-        // 更新进度
-        const pct=Math.min(100,(completed/total)*100);
-        document.getElementById('loadProgress').style.width=pct+'%';
-        document.getElementById('loadCount').textContent=`活跃天数 ${completed} / ${total}`;
-        document.getElementById('loadText').textContent=`正在计算活跃天数... ${Math.floor(pct)}%`;
-    }
-}
-
-// 获取单个地址的真实活跃天数
-async function getActiveDays(wallet){
-    try{
-        // 获取交易记录（只需要时间戳）
-        const trades=await api(`${DATA_API}/activity?user=${wallet}&limit=1000`);
-        if(!trades||!trades.length)return 1;
-        
-        // 收集所有交易日期
-        const daysSet=new Set();
-        trades.forEach(t=>{
-            const ts=t.timestamp||t.createdAt;
-            const d=parseTimestamp(ts);
-            if(d&&d.getFullYear()>=2000){
-                // 格式化为 YYYY-MM-DD
-                const dateStr=`${d.getFullYear()}-${d.getMonth()+1}-${d.getDate()}`;
-                daysSet.add(dateStr);
-            }
-        });
-        
-        return daysSet.size||1;
-    }catch(e){
-        return 1;
-    }
 }
 
 function showLoadingOverlay(show){
@@ -621,67 +575,36 @@ function filterTable(){
 }
 
 function sortColumn(key){
-    // 查找这个key是否已在排序列表中
-    const existingIdx=sortKeys.findIndex(s=>s.key===key);
+    document.querySelectorAll('th[data-sort]').forEach(th=>{
+        th.classList.remove('sorted');
+        th.querySelector('.sort-icon').textContent='↕';
+    });
     
-    if(existingIdx>=0){
-        const existing=sortKeys[existingIdx];
-        if(!existing.asc){
-            // 当前是降序，改为升序
-            existing.asc=true;
-        }else{
-            // 当前是升序，移除该排序
-            sortKeys.splice(existingIdx,1);
-        }
+    if(currentSortKey===key){
+        currentSortAsc=!currentSortAsc;
     }else{
-        // 新增排序条件（最多2个）
-        if(sortKeys.length>=2){
-            sortKeys.shift(); // 移除最早的
-        }
-        sortKeys.push({key,asc:false}); // 默认降序
+        currentSortKey=key;
+        currentSortAsc=key==='rank';
     }
     
-    // 更新UI
-    updateSortUI();
+    const th=document.querySelector(`th[data-sort="${key}"]`);
+    if(th){
+        th.classList.add('sorted');
+        th.querySelector('.sort-icon').textContent=currentSortAsc?'↑':'↓';
+    }
+    
     sortData();
     renderLeaderboard();
     updatePageDropdown();
 }
 
-function updateSortUI(){
-    document.querySelectorAll('th[data-sort]').forEach(th=>{
-        th.classList.remove('sorted','sort-1','sort-2');
-        const icon=th.querySelector('.sort-icon');
-        if(icon)icon.textContent='↕';
-    });
-    
-    sortKeys.forEach((s,idx)=>{
-        const th=document.querySelector(`th[data-sort="${s.key}"]`);
-        if(th){
-            th.classList.add('sorted',`sort-${idx+1}`);
-            const icon=th.querySelector('.sort-icon');
-            if(icon)icon.textContent=s.asc?'↑':'↓';
-        }
-    });
-}
-
 function sortData(){
-    if(sortKeys.length===0){
-        // 默认按rank排序
-        filteredData.sort((a,b)=>a.rank-b.rank);
-    }else{
-        filteredData.sort((a,b)=>{
-            for(const s of sortKeys){
-                let va=a[s.key],vb=b[s.key];
-                if(typeof va==='string'){va=va.toLowerCase();vb=vb.toLowerCase();}
-                if(va!==vb){
-                    if(s.asc)return va>vb?1:-1;
-                    return va<vb?1:-1;
-                }
-            }
-            return 0;
-        });
-    }
+    filteredData.sort((a,b)=>{
+        let va=a[currentSortKey],vb=b[currentSortKey];
+        if(typeof va==='string'){va=va.toLowerCase();vb=vb.toLowerCase();}
+        if(currentSortAsc)return va>vb?1:va<vb?-1:0;
+        return va<vb?1:va>vb?-1:0;
+    });
     filteredData.forEach((t,i)=>t.displayRank=i+1);
 }
 
@@ -699,8 +622,6 @@ function renderLeaderboard(){
         const displayRank=t.displayRank||t.rank;
         const catClass=`cat-${t.catKey.toLowerCase()}`;
         const catBadge=`<span class="category-badge ${catClass}">${catMap[t.catKey]?.en} ${catMap[t.catKey]?.zh}</span>`;
-        const daysDisplay=t.days!==null?t.days:'-';
-        const dailyDisplay=t.daily!==null?t.daily.toFixed(1):'-';
         return`<tr>
             <td class="col-rank">#${displayRank}</td>
             <td><a href="javascript:void(0)" onclick="loadAccount('${t.proxyWallet}')" class="wallet-link" title="${t.proxyWallet}">${t.proxyWallet}</a></td>
@@ -713,8 +634,8 @@ function renderLeaderboard(){
             <td class="col-avgbet">${fmt$(t.avgbet)}</td>
             <td class="col-avgprofit">${fmt$(t.avgprofit)}</td>
             <td class="col-invested">${fmt$(t.invested)}</td>
-            <td>${daysDisplay}</td>
-            <td class="col-roi">${dailyDisplay}</td>
+            <td>${t.days}</td>
+            <td class="col-roi">${t.daily.toFixed(1)}</td>
             <td class="col-volume">${fmt$(t.vol)}</td>
             <td>${catBadge}</td>
             <td class="col-time">${timeAgo(t.lastTime)}</td>
@@ -759,11 +680,13 @@ function goPage(p){page=parseInt(p);renderLeaderboard();updatePageDropdown();}
 
 function exportCSV(){
     if(!filteredData.length)return alert('无数据');
-    let csv='Rank,Wallet,PnL,Volume,ROI,WinRate,Trades,Category\n';
-    filteredData.forEach(t=>csv+=`${t.displayRank||t.rank},${t.proxyWallet},${t.pnl},${t.vol},${t.roi.toFixed(2)},${t.winrate.toFixed(2)},${t.trades},${t.catKey}\n`);
+    let csv='Rank,Wallet,PnL,Volume,ROI,WinRate,Trades,Category\
+';
+    filteredData.forEach(t=>csv+=`${t.displayRank||t.rank},${t.proxyWallet},${t.pnl},${t.vol},${t.roi.toFixed(2)},${t.winrate.toFixed(2)},${t.trades},${t.catKey}\
+`);
     downloadCSV(csv,`leaderboard_${timePeriod}_${Date.now()}.csv`);
 }
-function downloadCSV(csv,filename){const blob=new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=filename;a.click();}
+function downloadCSV(csv,filename){const blob=new Blob(['\﻿'+csv],{type:'text/csv;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=filename;a.click();}
 
 // Whale section
 async function loadWhaleData(){await Promise.all([loadMarkets(),loadWhaleTrades()]);}
@@ -773,7 +696,15 @@ async function loadWhaleTrades(){const c=document.getElementById('whaleList');tr
 // Account section
 async function loadAccount(addr){if(!addr||addr.length<10)return alert('请输入有效地址');wallet=addr;allPositions=[];allTrades=[];posPage=1;txPage=1;globalPnl=0;document.querySelectorAll('.nav-tab').forEach(t=>t.classList.remove('active'));document.querySelector('[data-panel="account"]').classList.add('active');document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));document.getElementById('account').classList.add('active');document.getElementById('accName').textContent=trunc(addr);document.getElementById('accAddr').textContent=addr;document.getElementById('linkPoly').href=`https://polymarket.com/profile/${addr}`;document.getElementById('linkScan').href=`https://polygonscan.com/address/${addr}`;resetAccountDisplay();document.getElementById('loadAllBtn').textContent='📥 加载全部';await Promise.all([loadUSDCBalance(),loadLBStats(),loadAllPositions(),loadInitialTrades()]);}
 function resetAccountDisplay(){const ids=['r1Balance','r1Pnl','r1Roi','r1Portfolio','r1AvgBet','r1AvgProfit','r1Invested','r1Unrealized','r1Volume','r1Category','r2Trades','r2Buy','r2Sell','r2BuyAmt','r2SellAmt','r2Markets','r2Days','r2Roi','r2Winrate','r3PosValue','r3PosCount','r3ProfitPos','r3LossPos','r3First','r3Last'];ids.forEach(id=>{const el=document.getElementById(id);if(el)el.textContent='-';});}
-async function loadUSDCBalance(){try{const tokenAddr='0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';const rpcUrl='https://polygon-rpc.com';const data={jsonrpc:'2.0',method:'eth_call',params:[{to:tokenAddr,data:'0x70a08231000000000000000000000000'+wallet.slice(2).toLowerCase()},'latest'],id:1};const resp=await fetch(PROXY+encodeURIComponent(rpcUrl),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});const result=await resp.json();if(result.result&&result.result!=='0x'){const balance=parseInt(result.result,16)/1e6;document.getElementById('r1Balance').textContent=fmt$(balance);}}catch(e){console.error('USDC balance error:',e);}}
+async function loadUSDCBalance(){try{const tokenAddr='0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';const rpcUrl='https://polygon-rpc.com';const data={jsonrpc:'2.0',method:'eth_call',params:[{to:tokenAddr,data:'0x70a08231000000000000000000000000'+wallet.slice(2).toLowerCase()},'latest'],id:1};
+    // 尝试多个代理
+    for(let proxy of ['https://corsproxy.io/?','https://api.allorigins.win/raw?url=']){
+        try{
+            const resp=await fetch(proxy+encodeURIComponent(rpcUrl),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+            const result=await resp.json();
+            if(result.result&&result.result!=='0x'){const balance=parseInt(result.result,16)/1e6;document.getElementById('r1Balance').textContent=fmt$(balance);return;}
+        }catch(e){}
+    }}catch(e){console.error('USDC balance error:',e);}}
 async function loadLBStats(){try{const data=await api(`${DATA_API}/v1/leaderboard?user=${wallet}&timePeriod=ALL`);if(data&&data.length){const u=data[0];const pnl=parseFloat(u.pnl||0);const vol=parseFloat(u.vol||0);globalPnl=pnl;document.getElementById('r1Pnl').textContent=(pnl>=0?'+':'')+fmt$(pnl);document.getElementById('r1Pnl').className='stat-item-value '+(pnl>=0?'col-pnl-pos':'col-pnl-neg');document.getElementById('r1Volume').textContent=fmt$(vol);if(u.userName)document.getElementById('accName').textContent=u.userName;}}catch(e){console.error(e);}}
 async function loadAllPositions(){const tb=document.getElementById('posBody');tb.innerHTML='<tr><td colspan="9" class="loading"><div class="loading-spinner"></div>加载持仓...</td></tr>';try{allPositions=await api(`${DATA_API}/positions?user=${wallet}&sizeThreshold=0`);if(!allPositions||!allPositions.length){tb.innerHTML='<tr><td colspan="9" class="no-results">暂无持仓</td></tr>';return;}let tv=0,ti=0,tp=0,pp=0,lp=0;const cats={};allPositions.forEach(p=>{const cv=parseFloat(p.currentValue||0),iv=parseFloat(p.initialValue||0),pnl=parseFloat(p.cashPnl||0);tv+=cv;ti+=iv;tp+=pnl;if(pnl>=0)pp++;else lp++;const title=(p.title||'').toLowerCase();if(title.includes('trump')||title.includes('election'))cats['Politics 政治']=(cats['Politics 政治']||0)+1;else if(title.includes('spread')||title.includes('vs.'))cats['Sports 体育']=(cats['Sports 体育']||0)+1;else cats['Other 其他']=(cats['Other 其他']||0)+1;});const mainCat=Object.entries(cats).sort((a,b)=>b[1]-a[1])[0];document.getElementById('r1Portfolio').textContent=fmt$(tv);document.getElementById('r1Invested').textContent=fmt$(ti);document.getElementById('r1Unrealized').textContent=(tp>=0?'+':'')+fmt$(tp);document.getElementById('r1Category').textContent=mainCat?mainCat[0]:'-';if(ti>0){const roi=(tp/ti)*100;document.getElementById('r1Roi').textContent=(roi>=0?'+':'')+roi.toFixed(1)+'%';document.getElementById('r2Roi').textContent=(roi>=0?'+':'')+roi.toFixed(1)+'%';}document.getElementById('r3PosValue').textContent=fmt$(tv);document.getElementById('r3PosCount').textContent=allPositions.length;document.getElementById('r3ProfitPos').textContent=pp;document.getElementById('r3LossPos').textContent=lp;document.getElementById('posTitle').textContent=`📁 持仓明细 (${allPositions.length}个)`;posPage=1;renderPositions();}catch(e){console.error(e);tb.innerHTML=`<tr><td colspan="9" class="error-msg">${e.message}</td></tr>`;}}
 function renderPositions(){const tb=document.getElementById('posBody');const totalP=Math.ceil(allPositions.length/itemsPerPage);const start=(posPage-1)*itemsPerPage;const pageData=allPositions.slice(start,start+itemsPerPage);tb.innerHTML=pageData.map(p=>{const pnl=parseFloat(p.cashPnl||0),pct=parseFloat(p.percentPnl||0);return`<tr><td style="max-width:180px;white-space:normal;">${p.title||'Unknown'}</td><td style="color:${(p.outcome||'Yes').toLowerCase()==='yes'?'var(--accent-green)':'var(--accent-red)'}">${p.outcome||'Yes'}</td><td>${parseFloat(p.size||0).toFixed(2)}</td><td>${(parseFloat(p.avgPrice||0)*100).toFixed(1)}¢</td><td>${(parseFloat(p.curPrice||0)*100).toFixed(1)}¢</td><td>${fmt$(parseFloat(p.initialValue||0))}</td><td>${fmt$(parseFloat(p.currentValue||0))}</td><td class="${pnl>=0?'col-pnl-pos':'col-pnl-neg'}">${pnl>=0?'+':''}${fmt$(pnl)}</td><td class="${pct>=0?'col-pnl-pos':'col-pnl-neg'}">${pct>=0?'+':''}${pct.toFixed(1)}%</td></tr>`;}).join('');updatePosDropdown(totalP);}
@@ -787,8 +718,12 @@ function renderTrades(){const tb=document.getElementById('txBody');const totalP=
 function updateTxDropdown(totalP){document.getElementById('txPageInfo').textContent=`${(txPage-1)*itemsPerPage+1}-${Math.min(txPage*itemsPerPage,allTrades.length)} / ${allTrades.length.toLocaleString()}`;document.getElementById('txSelectBtn').textContent=`第 ${txPage} 页 ▼`;buildPageDropdown('txDropdown',totalP,txPage,goTxPage);}
 function changeTxPage(d){txPage=Math.max(1,Math.min(Math.ceil(allTrades.length/itemsPerPage),txPage+d));renderTrades();}
 function goTxPage(p){txPage=parseInt(p);renderTrades();}
-function exportPositions(){if(!allPositions.length)return alert('无数据');let csv='Market,Direction,Size,AvgPrice,CurPrice,Cost,Value,PnL,PnL%\n';allPositions.forEach(p=>{csv+=`"${(p.title||'').replace(/"/g,'""')}",${p.outcome||''},${p.size||0},${p.avgPrice||0},${p.curPrice||0},${p.initialValue||0},${p.currentValue||0},${p.cashPnl||0},${p.percentPnl||0}\n`;});downloadCSV(csv,`positions_${wallet.slice(0,10)}.csv`);}
-function exportTrades(){if(!allTrades.length)return alert('无数据');let csv='Market,Side,Type,Price,Size,Amount,Time\n';allTrades.forEach(a=>{csv+=`"${(a.title||a.market||'').replace(/"/g,'""')}",${a.side||''},${a.type||''},${a.price||0},${a.size||0},${a.usdcSize||0},${a.timestamp||''}\n`;});downloadCSV(csv,`trades_${wallet.slice(0,10)}.csv`);}
+function exportPositions(){if(!allPositions.length)return alert('无数据');let csv='Market,Direction,Size,AvgPrice,CurPrice,Cost,Value,PnL,PnL%\
+';allPositions.forEach(p=>{csv+=`"${(p.title||'').replace(/"/g,'""')}",${p.outcome||''},${p.size||0},${p.avgPrice||0},${p.curPrice||0},${p.initialValue||0},${p.currentValue||0},${p.cashPnl||0},${p.percentPnl||0}\
+`;});downloadCSV(csv,`positions_${wallet.slice(0,10)}.csv`);}
+function exportTrades(){if(!allTrades.length)return alert('无数据');let csv='Market,Side,Type,Price,Size,Amount,Time\
+';allTrades.forEach(a=>{csv+=`"${(a.title||a.market||'').replace(/"/g,'""')}",${a.side||''},${a.type||''},${a.price||0},${a.size||0},${a.usdcSize||0},${a.timestamp||''}\
+`;});downloadCSV(csv,`trades_${wallet.slice(0,10)}.csv`);}
 function searchWallet(){const a=document.getElementById('walletSearch').value.trim();if(a)loadAccount(a);}
 document.getElementById('walletSearch').addEventListener('keypress',e=>{if(e.key==='Enter')searchWallet();});
 function copyAddr(){if(!wallet)return;navigator.clipboard.writeText(wallet).then(()=>{const b=document.querySelector('.copy-btn');b.textContent='✅ 已复制';setTimeout(()=>b.textContent='📋 复制',2000);});}
