@@ -40,10 +40,6 @@
         .btn-primary { background: var(--gradient-purple); color: white; }
         .btn-primary:hover { opacity: 0.9; }
         .live-indicator { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 6px 12px; background: var(--bg-tertiary); border-radius: 6px; }
-        .auto-refresh-toggle { display: flex; align-items: center; gap: 6px; margin-left: 8px; cursor: pointer; }
-        .auto-refresh-toggle input { width: 14px; height: 14px; cursor: pointer; accent-color: var(--accent-purple); }
-        .toggle-label { font-size: 11px; color: var(--text-muted); }
-        .auto-refresh-toggle input:checked + .toggle-label { color: var(--accent-green); }
         .live-dot { width: 8px; height: 8px; background: var(--accent-green); border-radius: 50%; animation: pulse 2s infinite; }
         .live-dot.loading { background: var(--accent-orange); }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
@@ -210,10 +206,6 @@
                     <span class="live-dot" id="liveDot"></span>
                     <span id="lastUpdate">加载中...</span>
                     <span class="countdown" id="countdown"></span>
-                    <label class="auto-refresh-toggle">
-                        <input type="checkbox" id="autoRefreshToggle" onchange="toggleAutoRefresh()">
-                        <span class="toggle-label">自动刷新</span>
-                    </label>
                 </div>
                 <div class="search-box">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
@@ -388,7 +380,7 @@ let category='OVERALL',timePeriod='DAY',orderBy='PNL',page=1,wallet='',minAmt=50
 let allData=[],filteredData=[];
 let sortKeys=[]; // 支持多列排序 [{key:'pnl',asc:false}, {key:'vol',asc:false}]
 let allPositions=[],allTrades=[],posPage=1,txPage=1,itemsPerPage=100,globalPnl=0;
-let refreshTimer=null,countdownTimer=null,nextRefresh=0,autoRefreshEnabled=false;
+let refreshTimer=null,countdownTimer=null,nextRefresh=0;
 
 const catMap={'OVERALL':{zh:'全部',en:'All'},'POLITICS':{zh:'政治',en:'Politics'},'SPORTS':{zh:'体育',en:'Sports'},'CRYPTO':{zh:'加密',en:'Crypto'},'FINANCE':{zh:'金融',en:'Finance'},'CULTURE':{zh:'文化',en:'Culture'},'WEATHER':{zh:'天气',en:'Weather'},'ECONOMICS':{zh:'经济',en:'Economics'},'TECH':{zh:'科技',en:'Tech'}};
 const timeMap={'DAY':'今天','WEEK':'周度','MONTH':'月度','ALL':'全部'};
@@ -467,7 +459,9 @@ async function loadAllLeaderboardData(){
         showLoadingOverlay(false);
         document.getElementById('liveDot').classList.remove('loading');
         document.getElementById('lastUpdate').textContent=new Date().toLocaleTimeString();
-        document.getElementById('countdown').textContent='';
+        
+        // Start countdown
+        startRefreshTimer();
         
     }catch(e){
         console.error(e);
@@ -563,17 +557,8 @@ function showLoadingOverlay(show){
     document.getElementById('loadingOverlay').style.display=show?'flex':'none';
 }
 
-function toggleAutoRefresh(){
-    autoRefreshEnabled=document.getElementById('autoRefreshToggle').checked;
-    if(autoRefreshEnabled){
-        startRefreshTimer();
-    }else{
-        stopRefreshTimer();
-    }
-}
-
 function startRefreshTimer(){
-    if(refreshTimer)clearTimeout(refreshTimer);
+    if(refreshTimer)clearInterval(refreshTimer);
     if(countdownTimer)clearInterval(countdownTimer);
     
     nextRefresh=Date.now()+REFRESH_INTERVAL;
@@ -586,18 +571,8 @@ function startRefreshTimer(){
     },1000);
     
     refreshTimer=setTimeout(()=>{
-        if(autoRefreshEnabled){
-            loadAllLeaderboardData().then(()=>{
-                if(autoRefreshEnabled)startRefreshTimer();
-            });
-        }
+        loadAllLeaderboardData();
     },REFRESH_INTERVAL);
-}
-
-function stopRefreshTimer(){
-    if(refreshTimer){clearTimeout(refreshTimer);refreshTimer=null;}
-    if(countdownTimer){clearInterval(countdownTimer);countdownTimer=null;}
-    document.getElementById('countdown').textContent='';
 }
 
 function refreshData(){
@@ -607,8 +582,6 @@ function refreshData(){
     loadAllLeaderboardData().then(()=>{
         btn.classList.remove('loading');
         btn.textContent='🔄 刷新';
-        // 如果自动刷新开启，重置计时器
-        if(autoRefreshEnabled)startRefreshTimer();
     });
 }
 
