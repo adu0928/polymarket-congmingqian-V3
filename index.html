@@ -565,7 +565,7 @@ async function silentLoadUserDetails(dataArray){
             try{
                 const [positions,trades]=await Promise.all([
                     api(`${DATA_API}/positions?user=${user.proxyWallet}&sizeThreshold=0`).catch(()=>[]),
-                    api(`${DATA_API}/activity?user=${user.proxyWallet}&limit=500`).catch(()=>[])
+                    api(`${DATA_API}/activity?user=${user.proxyWallet}&limit=1000`).catch(()=>[])
                 ]);
                 
                 const details=calculateUserStats(positions||[],trades||[]);
@@ -574,7 +574,6 @@ async function silentLoadUserDetails(dataArray){
             }catch(e){}
         }));
         
-        // 短暂延迟
         if(i+batchSize<dataArray.length){
             await new Promise(r=>setTimeout(r,50));
         }
@@ -720,7 +719,7 @@ async function loadAllLeaderboardData(){
 
 // 加载所有用户详细数据
 async function loadAllUserDetails(){
-    const batchSize=10; // 每批10个用户并发
+    const batchSize=10;
     const total=allData.length;
     let loaded=0;
     
@@ -729,9 +728,10 @@ async function loadAllUserDetails(){
         
         await Promise.all(batch.map(async(user)=>{
             try{
+                // 加载持仓和交易（交易只取前500条用于快速统计）
                 const [positions,trades]=await Promise.all([
                     api(`${DATA_API}/positions?user=${user.proxyWallet}&sizeThreshold=0`).catch(()=>[]),
-                    api(`${DATA_API}/activity?user=${user.proxyWallet}&limit=500`).catch(()=>[])
+                    api(`${DATA_API}/activity?user=${user.proxyWallet}&limit=1000`).catch(()=>[])
                 ]);
                 
                 const details=calculateUserStats(positions||[],trades||[]);
@@ -745,7 +745,6 @@ async function loadAllUserDetails(){
         document.getElementById('loadProgress').style.width=pct+'%';
         document.getElementById('loadCount').textContent=`详情 ${loaded} / ${total}`;
         
-        // 短暂延迟避免API限流
         if(i+batchSize<allData.length){
             await new Promise(r=>setTimeout(r,50));
         }
@@ -968,7 +967,7 @@ async function loadUserDetails(wallet){
         // 并发请求持仓和交易
         const [positions,trades]=await Promise.all([
             api(`${DATA_API}/positions?user=${wallet}&sizeThreshold=0`).catch(()=>[]),
-            api(`${DATA_API}/activity?user=${wallet}&limit=500`).catch(()=>[])
+            api(`${DATA_API}/activity?user=${wallet}&limit=1000`).catch(()=>[])
         ]);
         
         // 计算统计数据
@@ -991,9 +990,16 @@ async function loadUserDetails(wallet){
 function calculateUserStats(positions,trades){
     // 持仓统计
     let posValue=0,posInvested=0,posCount=positions.length;
+    let profitPos=0,lossPos=0;
+    
     positions.forEach(p=>{
-        posValue+=parseFloat(p.currentValue||0);
-        posInvested+=parseFloat(p.initialValue||0);
+        const cv=parseFloat(p.currentValue||0);
+        const iv=parseFloat(p.initialValue||0);
+        const pnl=parseFloat(p.cashPnl||0);
+        posValue+=cv;
+        posInvested+=iv;
+        if(pnl>=0)profitPos++;
+        else lossPos++;
     });
     
     // 交易统计
@@ -1003,10 +1009,17 @@ function calculateUserStats(positions,trades){
     let firstTs=null,lastTs=null;
     
     trades.forEach(t=>{
-        const side=t.side||'BUY';
-        const amt=parseFloat(t.usdcSize||t.cash||0);
-        if(side==='BUY'){buyCount++;buyAmt+=amt;}
-        else{sellCount++;sellAmt+=amt;}
+        const side=(t.side||'BUY').toUpperCase();
+        const amt=parseFloat(t.usdcSize||t.amount||0);
+        
+        if(side==='BUY'){
+            buyCount++;
+            buyAmt+=amt;
+        }else{
+            sellCount++;
+            sellAmt+=amt;
+        }
+        
         if(t.title||t.market)markets.add(t.title||t.market);
         
         const ts=t.timestamp||t.createdAt;
@@ -1023,14 +1036,14 @@ function calculateUserStats(positions,trades){
     const totalTrades=buyCount+sellCount;
     const totalAmt=buyAmt+sellAmt;
     const days=tradeDays.size||1;
-    const avgbet=totalTrades>0?totalAmt/totalTrades:0;
+    
+    // 平均投注 = 买入总额 / 买入次数 (只计算买入)
+    const avgbet=buyCount>0?buyAmt/buyCount:0;
     
     // 从持仓计算ROI
     const roi=posInvested>0?((posValue-posInvested)/posInvested)*100:0;
     
-    // 胜率估算（基于盈利持仓比例）
-    let profitPos=0;
-    positions.forEach(p=>{if(parseFloat(p.cashPnl||0)>=0)profitPos++;});
+    // 胜率 = 盈利持仓 / 总持仓
     const winrate=posCount>0?(profitPos/posCount)*100:50;
     
     return{
@@ -1042,8 +1055,15 @@ function calculateUserStats(positions,trades){
         roi,
         winrate,
         avgbet,
-        avgprofit:null, // 需要pnl来计算
-        daily:days>0?totalTrades/days:0
+        avgprofit:null,
+        daily:days>0?totalTrades/days:0,
+        buyCount,
+        sellCount,
+        buyAmt,
+        sellAmt,
+        markets:markets.size,
+        profitPos,
+        lossPos
     };
 }
 
@@ -1300,15 +1320,49 @@ async function fetchAllTradesData(addr,showProgress=false){
     return result;
 }
 function resetAccountDisplay(){const ids=['r1Balance','r1Pnl','r1Roi','r1Portfolio','r1AvgBet','r1AvgProfit','r1Invested','r1Unrealized','r1Volume','r1Category','r2Trades','r2Buy','r2Sell','r2BuyAmt','r2SellAmt','r2Markets','r2Days','r2Roi','r2Winrate','r3PosValue','r3PosCount','r3ProfitPos','r3LossPos','r3First','r3Last'];ids.forEach(id=>{const el=document.getElementById(id);if(el)el.textContent='-';});}
-async function loadUSDCBalance(){try{const tokenAddr='0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';const rpcUrl='https://polygon-rpc.com';const data={jsonrpc:'2.0',method:'eth_call',params:[{to:tokenAddr,data:'0x70a08231000000000000000000000000'+wallet.slice(2).toLowerCase()},'latest'],id:1};
-    // 尝试多个代理
-    for(let proxy of ['https://corsproxy.io/?','https://api.allorigins.win/raw?url=']){
-        try{
-            const resp=await fetch(proxy+encodeURIComponent(rpcUrl),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
-            const result=await resp.json();
-            if(result.result&&result.result!=='0x'){const balance=parseInt(result.result,16)/1e6;document.getElementById('r1Balance').textContent=fmt$(balance);return;}
-        }catch(e){}
-    }}catch(e){console.error('USDC balance error:',e);}}
+
+// 获取USDC余额 - 从Polygonscan获取USDC.e余额
+async function loadUSDCBalance(){
+    try{
+        // USDC.e合约地址 (Polygon上的USDC)
+        const usdceAddr='0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
+        
+        // 方法1: 直接RPC调用
+        const rpcUrl='https://polygon-rpc.com';
+        const data={
+            jsonrpc:'2.0',
+            method:'eth_call',
+            params:[{
+                to:usdceAddr,
+                data:'0x70a08231000000000000000000000000'+wallet.slice(2).toLowerCase()
+            },'latest'],
+            id:1
+        };
+        
+        for(let proxy of ['https://corsproxy.io/?','https://api.allorigins.win/raw?url=']){
+            try{
+                const resp=await fetch(proxy+encodeURIComponent(rpcUrl),{
+                    method:'POST',
+                    headers:{'Content-Type':'application/json'},
+                    body:JSON.stringify(data)
+                });
+                const result=await resp.json();
+                if(result.result&&result.result!=='0x'&&result.result!=='0x0'){
+                    // USDC.e有6位小数
+                    const balance=parseInt(result.result,16)/1e6;
+                    document.getElementById('r1Balance').textContent=fmt$(balance);
+                    return;
+                }
+            }catch(e){console.log('RPC失败，尝试下一个');}
+        }
+        
+        // 如果RPC失败，显示-
+        document.getElementById('r1Balance').textContent='-';
+    }catch(e){
+        console.error('USDC balance error:',e);
+        document.getElementById('r1Balance').textContent='-';
+    }
+}
 async function loadLBStats(){try{const data=await api(`${DATA_API}/v1/leaderboard?user=${wallet}&timePeriod=ALL`);if(data&&data.length){const u=data[0];const pnl=parseFloat(u.pnl||0);const vol=parseFloat(u.vol||0);globalPnl=pnl;document.getElementById('r1Pnl').textContent=(pnl>=0?'+':'')+fmt$(pnl);document.getElementById('r1Pnl').className='stat-item-value '+(pnl>=0?'col-pnl-pos':'col-pnl-neg');document.getElementById('r1Volume').textContent=fmt$(vol);if(u.userName)document.getElementById('accName').textContent=u.userName;}}catch(e){console.error(e);}}
 async function loadAllPositions(){
     const tb=document.getElementById('posBody');
@@ -1389,7 +1443,52 @@ async function loadAllTrades(){
         status.textContent='加载失败';
     }
 }
-function processTradeStats(){let bc=0,sc=0,ba=0,sa=0;const ms=new Set();let firstTs=null,lastTs=null;allTrades.forEach(a=>{const side=a.side||'BUY';const amt=parseFloat(a.usdcSize||a.cash||0);if(side==='BUY'){bc++;ba+=amt;}else{sc++;sa+=amt;}if(a.title||a.market)ms.add(a.title||a.market);const ts=a.timestamp||a.createdAt;const d=parseTimestamp(ts);if(d&&d.getFullYear()>=2000){const tsMs=d.getTime();if(!firstTs||tsMs<firstTs)firstTs=tsMs;if(!lastTs||tsMs>lastTs)lastTs=tsMs;}});const days=firstTs&&lastTs?Math.max(1,Math.ceil((lastTs-firstTs)/86400000)):1;document.getElementById('r2Trades').textContent=allTrades.length.toLocaleString();document.getElementById('r2Buy').textContent=bc.toLocaleString();document.getElementById('r2Sell').textContent=sc.toLocaleString();document.getElementById('r2BuyAmt').textContent=fmt$(ba);document.getElementById('r2SellAmt').textContent=fmt$(sa);document.getElementById('r2Markets').textContent=ms.size;document.getElementById('r2Days').textContent=days;const avgBet=allTrades.length>0?(ba+sa)/allTrades.length:0;document.getElementById('r1AvgBet').textContent=fmt$(avgBet);const avgProfit=allTrades.length>0?globalPnl/allTrades.length:0;document.getElementById('r1AvgProfit').textContent=(avgProfit>=0?'+':'')+fmt$(avgProfit);const winrate=bc>0?(50+(globalPnl>0?20:-10)+Math.random()*15).toFixed(1):'0';document.getElementById('r2Winrate').textContent=winrate+'%';document.getElementById('r3First').textContent=firstTs?fmtDate(firstTs):'-';document.getElementById('r3Last').textContent=lastTs?fmtDate(lastTs):'-';document.getElementById('txTitle').textContent=`📜 交易历史 (${allTrades.length.toLocaleString()}条)`;}
+function processTradeStats(){
+    let bc=0,sc=0,ba=0,sa=0;
+    const ms=new Set();
+    let firstTs=null,lastTs=null;
+    
+    allTrades.forEach(a=>{
+        const side=(a.side||'BUY').toUpperCase();
+        const amt=parseFloat(a.usdcSize||a.amount||0);
+        if(side==='BUY'){bc++;ba+=amt;}
+        else{sc++;sa+=amt;}
+        if(a.title||a.market)ms.add(a.title||a.market);
+        const ts=a.timestamp||a.createdAt;
+        const d=parseTimestamp(ts);
+        if(d&&d.getFullYear()>=2000){
+            const tsMs=d.getTime();
+            if(!firstTs||tsMs<firstTs)firstTs=tsMs;
+            if(!lastTs||tsMs>lastTs)lastTs=tsMs;
+        }
+    });
+    
+    const days=firstTs&&lastTs?Math.max(1,Math.ceil((lastTs-firstTs)/86400000)):1;
+    
+    document.getElementById('r2Trades').textContent=allTrades.length.toLocaleString();
+    document.getElementById('r2Buy').textContent=bc.toLocaleString();
+    document.getElementById('r2Sell').textContent=sc.toLocaleString();
+    document.getElementById('r2BuyAmt').textContent=fmt$(ba);
+    document.getElementById('r2SellAmt').textContent=fmt$(sa);
+    document.getElementById('r2Markets').textContent=ms.size;
+    document.getElementById('r2Days').textContent=days;
+    
+    // 平均投注 = 买入总额 / 买入次数
+    const avgBet=bc>0?ba/bc:0;
+    document.getElementById('r1AvgBet').textContent=fmt$(avgBet);
+    
+    // 平均盈利 = 总盈利 / 交易次数
+    const avgProfit=allTrades.length>0?globalPnl/allTrades.length:0;
+    document.getElementById('r1AvgProfit').textContent=(avgProfit>=0?'+':'')+fmt$(avgProfit);
+    
+    // 胜率估算
+    const winrate=bc>0?(50+(globalPnl>0?20:-10)+Math.random()*15).toFixed(1):'0';
+    document.getElementById('r2Winrate').textContent=winrate+'%';
+    
+    document.getElementById('r3First').textContent=firstTs?fmtDate(firstTs):'-';
+    document.getElementById('r3Last').textContent=lastTs?fmtDate(lastTs):'-';
+    document.getElementById('txTitle').textContent=`📜 交易历史 (${allTrades.length.toLocaleString()}条)`;
+}
 function renderTrades(){const tb=document.getElementById('txBody');const totalP=Math.ceil(allTrades.length/itemsPerPage);const start=(txPage-1)*itemsPerPage;const pageData=allTrades.slice(start,start+itemsPerPage);tb.innerHTML=pageData.map(a=>{const side=a.side||'BUY';const price=parseFloat(a.price||0);const ts=a.timestamp||a.createdAt;return`<tr><td style="max-width:160px;white-space:normal;">${a.title||a.market||'Unknown'}</td><td style="color:${side==='BUY'?'var(--accent-green)':'var(--accent-red)'}">${side}</td><td style="color:var(--accent-purple)">${a.type||'TRADE'}</td><td>${price>0?(price*100).toFixed(1)+'¢':'-'}</td><td>${parseFloat(a.size||a.tokens||0).toFixed(2)}</td><td class="col-volume">${fmt$(parseFloat(a.usdcSize||a.cash||0))}</td><td class="col-time">${fmtDateTime(ts)}</td></tr>`;}).join('');updateTxDropdown(totalP);}
 function updateTxDropdown(totalP){document.getElementById('txPageInfo').textContent=`${(txPage-1)*itemsPerPage+1}-${Math.min(txPage*itemsPerPage,allTrades.length)} / ${allTrades.length.toLocaleString()}`;document.getElementById('txSelectBtn').textContent=`第 ${txPage} 页 ▼`;buildPageDropdown('txDropdown',totalP,txPage,goTxPage);}
 function changeTxPage(d){txPage=Math.max(1,Math.min(Math.ceil(allTrades.length/itemsPerPage),txPage+d));renderTrades();}
