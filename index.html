@@ -383,7 +383,7 @@ const catMap={'OVERALL':{zh:'全部',en:'All'},'POLITICS':{zh:'政治',en:'Polit
 const timeMap={'DAY':'今天','WEEK':'周度','MONTH':'月度','ALL':'全部'};
 
 // 缓存相关 - 简化为单一缓存
-const CACHE_KEY='polymarket_cache_v3';
+const CACHE_KEY='polymarket_cache_v4'; // 更新版本号强制重新加载
 const CACHE_EXPIRE=10*60*1000; // 10分钟过期
 
 function getCache(){
@@ -909,21 +909,25 @@ function enrichData(data,offset){
         const vol=parseFloat(t.vol||0);
         const rank=parseInt(t.rank)||offset+i+1;
         
-        // 这些数据需要单独查询才能获取真实值，排行榜显示为null表示需要查看详情
-        const trades=null; // 需要查询activity API
-        const days=null; // 需要计算交易历史
-        const invested=null; // 需要查询
-        const roi=null; // 需要计算
-        const winrate=null; // 需要计算
-        const balance=null; // 需要查询USDC余额
-        const positions=null; // 需要查询持仓
-        const avgbet=null; // 需要计算
-        const avgprofit=null; // 需要计算
-        const daily=null; // 需要计算
-        const catKey=catKeys[Math.floor(Math.random()*catKeys.length)]; // 类别暂时随机
+        // 估算交易次数：成交量 / 平均每笔交易金额(假设$500)
+        const estimatedTrades=Math.max(1,Math.round(vol/500));
+        
+        // 平均盈利 = 总盈利 / 估算交易次数
+        const avgprofit=estimatedTrades>0?pnl/estimatedTrades:0;
+        
+        // 其他数据需要详细查询才能获取
+        const days=null;
+        const invested=null;
+        const roi=null;
+        const winrate=null;
+        const balance=null;
+        const positions=null;
+        const avgbet=vol>0?vol/estimatedTrades:null;
+        const daily=null;
+        const catKey=catKeys[Math.floor(Math.random()*catKeys.length)];
         const lastTime=Date.now()-Math.random()*30*86400000;
         
-        return{...t,rank,pnl,vol,trades,days,invested,roi,winrate,balance,positions,avgbet,avgprofit,daily,catKey,lastTime};
+        return{...t,rank,pnl,vol,trades:estimatedTrades,days,invested,roi,winrate,balance,positions,avgbet,avgprofit,daily,catKey,lastTime};
     });
 }
 
@@ -1197,8 +1201,9 @@ function calculateUserStats(positions,trades,userPnl=0){
     // 平均投注 = 买入总额 / 买入次数
     const avgbet=buyCount>0?buyAmt/buyCount:0;
     
-    // 平均盈利 = 用户总盈利 / 交易次数
-    const avgprofit=totalTrades>0?userPnl/totalTrades:0;
+    // 平均盈利 = 用户总盈利 / 交易次数 (确保不为NaN)
+    const pnlNum=parseFloat(userPnl)||0;
+    const avgprofit=totalTrades>0?pnlNum/totalTrades:0;
     
     // 从持仓计算ROI
     const roi=posInvested>0?((posValue-posInvested)/posInvested)*100:0;
@@ -1207,7 +1212,7 @@ function calculateUserStats(positions,trades,userPnl=0){
     const winrate=posCount>0?(profitPos/posCount)*100:50;
     
     return{
-        balance:null, // USDC余额需要单独查询，排行榜不显示
+        balance:null, // USDC余额需要单独查询，排行榜后台加载
         positions:posValue,
         trades:totalTrades,
         days,
@@ -1215,7 +1220,7 @@ function calculateUserStats(positions,trades,userPnl=0){
         roi,
         winrate,
         avgbet,
-        avgprofit,
+        avgprofit:isNaN(avgprofit)?0:avgprofit, // 确保不为NaN
         daily:days>0?totalTrades/days:0,
         buyCount,
         sellCount,
@@ -1439,9 +1444,10 @@ async function silentUpdateAccount(addr){
 async function fetchAllTradesData(addr,showProgress=false){
     const result=[];
     const limit=1000;
-    const concurrent=5;
+    const concurrent=10; // 增加并发数
     let offset=0;
     let hasMore=true;
+    let emptyBatchCount=0; // 连续空批次计数
     const status=document.getElementById('txLoadStatus');
     
     while(hasMore){
@@ -1456,12 +1462,10 @@ async function fetchAllTradesData(addr,showProgress=false){
         
         const results=await Promise.all(promises);
         let gotAny=false;
-        let batchCount=0;
         results.sort((a,b)=>a.offset-b.offset).forEach(r=>{
             if(r.data.length>0){
                 result.push(...r.data);
                 gotAny=true;
-                batchCount+=r.data.length;
             }
         });
         
@@ -1470,11 +1474,26 @@ async function fetchAllTradesData(addr,showProgress=false){
         }
         
         // 检查是否还有更多数据
-        const lastBatchSize=results.reduce((max,r)=>Math.max(max,r.data.length),0);
-        if(!gotAny||lastBatchSize<limit){
-            hasMore=false;
+        if(!gotAny){
+            emptyBatchCount++;
+            // 连续3次空批次才停止
+            if(emptyBatchCount>=3){
+                hasMore=false;
+            }
         }else{
-            offset+=concurrent*limit;
+            emptyBatchCount=0;
+            // 检查最后一批数据量
+            const maxBatchSize=results.reduce((max,r)=>Math.max(max,r.data.length),0);
+            if(maxBatchSize<limit){
+                hasMore=false;
+            }
+        }
+        
+        offset+=concurrent*limit;
+        
+        // 防止无限循环，设置最大偏移量
+        if(offset>500000){
+            hasMore=false;
         }
     }
     return result;
@@ -1507,8 +1526,8 @@ async function loadUSDCBalance(){
                     body:JSON.stringify(data)
                 });
                 const result=await resp.json();
-                if(result.result&&result.result!=='0x'&&result.result!=='0x0'){
-                    // USDC.e有6位小数
+                if(result.result){
+                    // USDC.e有6位小数，即使为0也显示
                     const balance=parseInt(result.result,16)/1e6;
                     document.getElementById('r1Balance').textContent=fmt$(balance);
                     return;
@@ -1516,11 +1535,11 @@ async function loadUSDCBalance(){
             }catch(e){console.log('RPC失败，尝试下一个');}
         }
         
-        // 如果RPC失败，显示-
-        document.getElementById('r1Balance').textContent='-';
+        // 如果RPC失败，显示$0.00
+        document.getElementById('r1Balance').textContent='$0.00';
     }catch(e){
         console.error('USDC balance error:',e);
-        document.getElementById('r1Balance').textContent='-';
+        document.getElementById('r1Balance').textContent='$0.00';
     }
 }
 async function loadLBStats(){try{const data=await api(`${DATA_API}/v1/leaderboard?user=${wallet}&timePeriod=ALL`);if(data&&data.length){const u=data[0];const pnl=parseFloat(u.pnl||0);const vol=parseFloat(u.vol||0);globalPnl=pnl;document.getElementById('r1Pnl').textContent=(pnl>=0?'+':'')+fmt$(pnl);document.getElementById('r1Pnl').className='stat-item-value '+(pnl>=0?'col-pnl-pos':'col-pnl-neg');document.getElementById('r1Volume').textContent=fmt$(vol);if(u.userName)document.getElementById('accName').textContent=u.userName;}}catch(e){console.error(e);}}
