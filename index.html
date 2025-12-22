@@ -88,6 +88,7 @@
         .col-invested { color: var(--accent-yellow); }
         .col-volume { color: var(--accent-blue); font-weight: 500; }
         .col-time { color: var(--text-muted); font-size: 11px; }
+        .loading-cell { color: var(--text-muted); font-style: italic; animation: pulse 1s infinite; }
         .category-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 500; }
         .cat-politics { background: var(--accent-blue-dim); color: var(--accent-blue); }
         .cat-sports { background: var(--accent-green-dim); color: var(--accent-green); }
@@ -500,7 +501,7 @@ function updateStats(){
     document.getElementById('dataInfo').textContent=`${allData.length}条数据`;
 }
 
-// 后台静默更新
+// 后台静默更新（完整更新，不打断前端）
 async function silentUpdate(){
     showUpdateIndicator(true,'后台更新中...');
     
@@ -511,36 +512,73 @@ async function silentUpdate(){
     const currentSearch=document.getElementById('tableSearch').value;
     
     try{
+        // 阶段1: 获取排行榜数据
         const newData=await fetchLeaderboardData();
-        if(newData&&newData.length>0){
-            // 新数据加载成功，才替换旧数据
-            allData=newData;
-            setCache(allData);
-            
-            // 恢复筛选状态
-            category=currentCategory;
-            timePeriod=currentTimePeriod;
-            document.getElementById('tableSearch').value=currentSearch;
-            
-            updateStats();
-            applyFiltersAndSort();
-            
-            // 尽量恢复到之前的页码
-            const maxPage=Math.ceil(filteredData.length/PAGE_SIZE);
-            page=Math.min(currentPage,maxPage);
-            renderLeaderboard();
-            updatePageDropdown();
-            
-            document.getElementById('lastUpdate').textContent=new Date().toLocaleTimeString();
+        if(!newData||newData.length===0){
+            throw new Error('获取数据失败');
         }
-        // 如果newData为空或加载失败，保持原有数据不变
+        
+        // 阶段2: 后台加载所有用户详情
+        await silentLoadUserDetails(newData);
+        
+        // 新数据加载完成，替换旧数据
+        allData=newData;
+        setCache(allData);
+        
+        // 恢复筛选状态
+        category=currentCategory;
+        timePeriod=currentTimePeriod;
+        document.getElementById('tableSearch').value=currentSearch;
+        
+        updateStats();
+        applyFiltersAndSort();
+        
+        // 恢复页码
+        const maxPage=Math.ceil(filteredData.length/PAGE_SIZE);
+        page=Math.min(currentPage,maxPage);
+        renderLeaderboard();
+        updatePageDropdown();
+        
+        document.getElementById('lastUpdate').textContent=new Date().toLocaleTimeString();
     }catch(e){
         console.error('后台更新失败，保持现有数据:',e);
-        // 失败时不做任何改变，用户无感知
     }
     
     showUpdateIndicator(false);
     startRefreshTimer();
+}
+
+// 后台加载用户详情（不显示进度）
+async function silentLoadUserDetails(dataArray){
+    const batchSize=10;
+    
+    for(let i=0;i<dataArray.length;i+=batchSize){
+        const batch=dataArray.slice(i,i+batchSize);
+        
+        await Promise.all(batch.map(async(user)=>{
+            // 检查缓存
+            if(detailCache[user.proxyWallet]){
+                Object.assign(user,detailCache[user.proxyWallet]);
+                return;
+            }
+            
+            try{
+                const [positions,trades]=await Promise.all([
+                    api(`${DATA_API}/positions?user=${user.proxyWallet}&sizeThreshold=0`).catch(()=>[]),
+                    api(`${DATA_API}/activity?user=${user.proxyWallet}&limit=500`).catch(()=>[])
+                ]);
+                
+                const details=calculateUserStats(positions||[],trades||[]);
+                Object.assign(user,details);
+                detailCache[user.proxyWallet]=details;
+            }catch(e){}
+        }));
+        
+        // 短暂延迟
+        if(i+batchSize<dataArray.length){
+            await new Promise(r=>setTimeout(r,50));
+        }
+    }
 }
 
 // 获取排行榜数据（纯数据获取，不更新UI）
@@ -613,22 +651,22 @@ async function loadAllLeaderboardData(){
     
     try{
         allData=[];
-        const limit=200; // 每批200条
-        const concurrent=10; // 10个并发请求
+        const limit=200;
+        const concurrent=10;
         let completed=0;
         
-        // 生成所有请求
         const totalBatches=Math.ceil(MAX_DATA/limit);
         const batches=[];
         for(let i=0;i<totalBatches;i++){
             batches.push(i*limit);
         }
         
-        // 并发执行
+        // 阶段1: 加载排行榜基础数据
+        document.getElementById('loadText').textContent='阶段1/2: 加载排行榜...';
+        
         for(let i=0;i<batches.length;i+=concurrent){
             const batch=batches.slice(i,i+concurrent);
             const promises=batch.map(offset=>{
-                // 始终使用ALL获取全量数据，本地筛选时间
                 const url=`${DATA_API}/v1/leaderboard?category=OVERALL&timePeriod=ALL&orderBy=PNL&limit=${limit}&offset=${offset}`;
                 return api(url).then(data=>({offset,data})).catch(()=>({offset,data:[]}));
             });
@@ -642,18 +680,20 @@ async function loadAllLeaderboardData(){
             
             completed+=batch.length;
             const loaded=Math.min(completed*limit,MAX_DATA);
-            document.getElementById('loadProgress').style.width=(completed/totalBatches*100)+'%';
+            document.getElementById('loadProgress').style.width=(completed/totalBatches*50)+'%';
             document.getElementById('loadCount').textContent=`${loaded} / ${MAX_DATA}`;
-            document.getElementById('loadText').textContent=`高速加载中... (${concurrent}x并发)`;
         }
         
-        // 按rank排序
         allData.sort((a,b)=>a.rank-b.rank);
         
-        // 保存缓存
+        // 阶段2: 加载所有用户详细数据
+        document.getElementById('loadText').textContent='阶段2/2: 加载用户详情...';
+        await loadAllUserDetails();
+        
+        // 保存完整缓存
         setCache(allData);
         
-        // Calculate totals
+        // 更新统计和显示
         let totalPnl=0,totalVol=0;
         allData.forEach(t=>{totalPnl+=t.pnl;totalVol+=t.vol;});
         document.getElementById('statPnl').textContent=fmt$(totalPnl);
@@ -661,7 +701,6 @@ async function loadAllLeaderboardData(){
         document.getElementById('statTotal').textContent=allData.length.toLocaleString();
         document.getElementById('dataInfo').textContent=`${allData.length}条数据`;
         
-        // Apply filters and render
         currentSortKey='rank';
         currentSortAsc=true;
         applyFiltersAndSort();
@@ -670,7 +709,6 @@ async function loadAllLeaderboardData(){
         document.getElementById('liveDot').classList.remove('loading');
         document.getElementById('lastUpdate').textContent=new Date().toLocaleTimeString();
         
-        // Start countdown
         startRefreshTimer();
         
     }catch(e){
@@ -680,27 +718,62 @@ async function loadAllLeaderboardData(){
     }
 }
 
+// 加载所有用户详细数据
+async function loadAllUserDetails(){
+    const batchSize=10; // 每批10个用户并发
+    const total=allData.length;
+    let loaded=0;
+    
+    for(let i=0;i<allData.length;i+=batchSize){
+        const batch=allData.slice(i,i+batchSize);
+        
+        await Promise.all(batch.map(async(user)=>{
+            try{
+                const [positions,trades]=await Promise.all([
+                    api(`${DATA_API}/positions?user=${user.proxyWallet}&sizeThreshold=0`).catch(()=>[]),
+                    api(`${DATA_API}/activity?user=${user.proxyWallet}&limit=500`).catch(()=>[])
+                ]);
+                
+                const details=calculateUserStats(positions||[],trades||[]);
+                Object.assign(user,details);
+                detailCache[user.proxyWallet]=details;
+            }catch(e){}
+        }));
+        
+        loaded+=batch.length;
+        const pct=50+(loaded/total*50);
+        document.getElementById('loadProgress').style.width=pct+'%';
+        document.getElementById('loadCount').textContent=`详情 ${loaded} / ${total}`;
+        
+        // 短暂延迟避免API限流
+        if(i+batchSize<allData.length){
+            await new Promise(r=>setTimeout(r,50));
+        }
+    }
+}
+
 function enrichData(data,offset){
     const catKeys=Object.keys(catMap).filter(k=>k!=='OVERALL');
     return data.map((t,i)=>{
+        // 使用API返回的真实数据
         const pnl=parseFloat(t.pnl||0);
         const vol=parseFloat(t.vol||0);
         const rank=parseInt(t.rank)||offset+i+1;
-        const trades=Math.max(1,Math.floor(vol/500));
-        // 随机生成最近交易时间（用于本地时间筛选）
-        const lastTime=Date.now()-Math.random()*30*86400000; // 0-30天内随机
-        // 根据lastTime计算活跃天数
-        const daysAgo=Math.ceil((Date.now()-lastTime)/86400000);
-        const days=Math.max(1,Math.min(daysAgo,365));
-        const invested=vol>0?vol*0.4:0;
-        const roi=invested>0?(pnl/invested)*100:0;
-        const winrate=pnl>0?50+Math.random()*40:20+Math.random()*30;
-        const balance=Math.random()*50000+1000;
-        const positions=Math.floor(Math.random()*20)+1;
-        const avgbet=trades>0?vol/trades:0;
-        const avgprofit=trades>0?pnl/trades:0;
-        const daily=trades/days;
-        const catKey=catKeys[Math.floor(Math.random()*catKeys.length)];
+        
+        // 这些数据需要单独查询才能获取真实值，排行榜显示为null表示需要查看详情
+        const trades=null; // 需要查询activity API
+        const days=null; // 需要计算交易历史
+        const invested=null; // 需要查询
+        const roi=null; // 需要计算
+        const winrate=null; // 需要计算
+        const balance=null; // 需要查询USDC余额
+        const positions=null; // 需要查询持仓
+        const avgbet=null; // 需要计算
+        const avgprofit=null; // 需要计算
+        const daily=null; // 需要计算
+        const catKey=catKeys[Math.floor(Math.random()*catKeys.length)]; // 类别暂时随机
+        const lastTime=Date.now()-Math.random()*30*86400000;
+        
         return{...t,rank,pnl,vol,trades,days,invested,roi,winrate,balance,positions,avgbet,avgprofit,daily,catKey,lastTime};
     });
 }
@@ -843,26 +916,157 @@ function renderLeaderboard(){
         const displayRank=t.displayRank||t.rank;
         const catClass=`cat-${t.catKey.toLowerCase()}`;
         const catBadge=`<span class="category-badge ${catClass}">${catMap[t.catKey]?.en} ${catMap[t.catKey]?.zh}</span>`;
-        return`<tr>
+        
+        // 显示已加载的数据，未加载显示-
+        const fmtVal=(v,formatter)=>v===null||v===undefined?'-':formatter(v);
+        const fmtPct=(v)=>v===null||v===undefined?'-':(v>=0?'+':'')+v.toFixed(1)+'%';
+        const fmtNum=(v)=>v===null||v===undefined?'-':v.toLocaleString();
+        
+        return`<tr data-wallet="${t.proxyWallet}">
             <td class="col-rank">#${displayRank}</td>
             <td><a href="javascript:void(0)" onclick="loadAccount('${t.proxyWallet}')" class="wallet-link" title="${t.proxyWallet}">${t.proxyWallet}</a></td>
             <td class="${t.pnl>=0?'col-pnl-pos':'col-pnl-neg'}">${t.pnl>=0?'+':''}${fmt$(t.pnl)}</td>
-            <td class="col-roi">${t.roi>=0?'+':''}${t.roi.toFixed(1)}%</td>
-            <td class="col-winrate">${t.winrate.toFixed(1)}%</td>
-            <td class="col-balance">${fmt$(t.balance)}</td>
-            <td class="col-positions">${fmt$(t.positions*1000)}</td>
-            <td class="col-trades">${t.trades.toLocaleString()}</td>
-            <td class="col-avgbet">${fmt$(t.avgbet)}</td>
-            <td class="col-avgprofit">${fmt$(t.avgprofit)}</td>
-            <td class="col-invested">${fmt$(t.invested)}</td>
-            <td>${t.days}</td>
-            <td class="col-roi">${t.daily.toFixed(1)}</td>
+            <td class="${t.roi>=0?'col-pnl-pos':'col-pnl-neg'}">${fmtPct(t.roi)}</td>
+            <td class="col-winrate">${fmtPct(t.winrate)}</td>
+            <td class="col-balance">${fmtVal(t.balance,fmt$)}</td>
+            <td class="col-positions">${fmtVal(t.positions,fmt$)}</td>
+            <td class="col-trades">${fmtNum(t.trades)}</td>
+            <td class="col-avgbet">${fmtVal(t.avgbet,fmt$)}</td>
+            <td class="col-avgprofit">${fmtVal(t.avgprofit,fmt$)}</td>
+            <td class="col-invested">${fmtVal(t.invested,fmt$)}</td>
+            <td>${t.days===null||t.days===undefined?'-':t.days}</td>
+            <td>${t.daily===null||t.daily===undefined?'-':t.daily.toFixed(1)}</td>
             <td class="col-volume">${fmt$(t.vol)}</td>
             <td>${catBadge}</td>
             <td class="col-time">${timeAgo(t.lastTime)}</td>
             <td><button class="action-btn" onclick="loadAccount('${t.proxyWallet}')">详情</button></td>
         </tr>`;
     }).join('');
+}
+
+// 详细数据缓存
+const detailCache={};
+
+// 懒加载当前页详细数据
+async function lazyLoadPageDetails(pageData){
+    // 降低并发，每次2个，避免API限流
+    const batchSize=2;
+    for(let i=0;i<pageData.length;i+=batchSize){
+        const batch=pageData.slice(i,i+batchSize);
+        await Promise.all(batch.map(t=>loadUserDetails(t.proxyWallet)));
+        // 间隔100ms
+        await new Promise(r=>setTimeout(r,100));
+    }
+}
+
+// 加载单个用户详细数据
+async function loadUserDetails(wallet){
+    // 检查缓存
+    if(detailCache[wallet])return updateRowWithDetails(wallet,detailCache[wallet]);
+    
+    try{
+        // 并发请求持仓和交易
+        const [positions,trades]=await Promise.all([
+            api(`${DATA_API}/positions?user=${wallet}&sizeThreshold=0`).catch(()=>[]),
+            api(`${DATA_API}/activity?user=${wallet}&limit=500`).catch(()=>[])
+        ]);
+        
+        // 计算统计数据
+        const details=calculateUserStats(positions||[],trades||[]);
+        detailCache[wallet]=details;
+        
+        // 更新表格行
+        updateRowWithDetails(wallet,details);
+        
+        // 更新allData中的数据
+        const item=allData.find(t=>t.proxyWallet===wallet);
+        if(item)Object.assign(item,details);
+        
+    }catch(e){
+        console.error('加载详情失败:',wallet,e);
+    }
+}
+
+// 计算用户统计数据（与账户详情逻辑一致）
+function calculateUserStats(positions,trades){
+    // 持仓统计
+    let posValue=0,posInvested=0,posCount=positions.length;
+    positions.forEach(p=>{
+        posValue+=parseFloat(p.currentValue||0);
+        posInvested+=parseFloat(p.initialValue||0);
+    });
+    
+    // 交易统计
+    let buyCount=0,sellCount=0,buyAmt=0,sellAmt=0;
+    const markets=new Set();
+    const tradeDays=new Set();
+    let firstTs=null,lastTs=null;
+    
+    trades.forEach(t=>{
+        const side=t.side||'BUY';
+        const amt=parseFloat(t.usdcSize||t.cash||0);
+        if(side==='BUY'){buyCount++;buyAmt+=amt;}
+        else{sellCount++;sellAmt+=amt;}
+        if(t.title||t.market)markets.add(t.title||t.market);
+        
+        const ts=t.timestamp||t.createdAt;
+        const d=parseTimestamp(ts);
+        if(d&&d.getFullYear()>=2000){
+            const dateStr=d.toISOString().split('T')[0];
+            tradeDays.add(dateStr);
+            const tsMs=d.getTime();
+            if(!firstTs||tsMs<firstTs)firstTs=tsMs;
+            if(!lastTs||tsMs>lastTs)lastTs=tsMs;
+        }
+    });
+    
+    const totalTrades=buyCount+sellCount;
+    const totalAmt=buyAmt+sellAmt;
+    const days=tradeDays.size||1;
+    const avgbet=totalTrades>0?totalAmt/totalTrades:0;
+    
+    // 从持仓计算ROI
+    const roi=posInvested>0?((posValue-posInvested)/posInvested)*100:0;
+    
+    // 胜率估算（基于盈利持仓比例）
+    let profitPos=0;
+    positions.forEach(p=>{if(parseFloat(p.cashPnl||0)>=0)profitPos++;});
+    const winrate=posCount>0?(profitPos/posCount)*100:50;
+    
+    return{
+        balance:null, // USDC余额需要单独查询
+        positions:posValue,
+        trades:totalTrades,
+        days,
+        invested:posInvested,
+        roi,
+        winrate,
+        avgbet,
+        avgprofit:null, // 需要pnl来计算
+        daily:days>0?totalTrades/days:0
+    };
+}
+
+// 更新表格行显示
+function updateRowWithDetails(wallet,details){
+    const row=document.querySelector(`tr[data-wallet="${wallet}"]`);
+    if(!row)return;
+    
+    const updateCell=(field,value,formatter)=>{
+        const cell=row.querySelector(`[data-field="${field}"]`);
+        if(cell&&value!==null&&value!==undefined){
+            cell.innerHTML=formatter(value);
+        }
+    };
+    
+    updateCell('roi',details.roi,v=>`<span class="${v>=0?'col-pnl-pos':'col-pnl-neg'}">${v>=0?'+':''}${v.toFixed(1)}%</span>`);
+    updateCell('winrate',details.winrate,v=>`${v.toFixed(1)}%`);
+    updateCell('positions',details.positions,v=>fmt$(v));
+    updateCell('trades',details.trades,v=>v.toLocaleString());
+    updateCell('avgbet',details.avgbet,v=>fmt$(v));
+    updateCell('invested',details.invested,v=>fmt$(v));
+    updateCell('days',details.days,v=>v);
+    updateCell('daily',details.daily,v=>v.toFixed(1));
 }
 
 function togglePageDropdown(){document.getElementById('pageDropdown').classList.toggle('show');}
@@ -1052,12 +1256,13 @@ async function silentUpdateAccount(addr){
 }
 
 // 获取所有交易数据（纯数据，不更新UI）
-async function fetchAllTradesData(addr){
+async function fetchAllTradesData(addr,showProgress=false){
     const result=[];
     const limit=1000;
     const concurrent=5;
     let offset=0;
     let hasMore=true;
+    const status=document.getElementById('txLoadStatus');
     
     while(hasMore){
         const promises=[];
@@ -1071,15 +1276,22 @@ async function fetchAllTradesData(addr){
         
         const results=await Promise.all(promises);
         let gotAny=false;
+        let batchCount=0;
         results.sort((a,b)=>a.offset-b.offset).forEach(r=>{
             if(r.data.length>0){
                 result.push(...r.data);
                 gotAny=true;
+                batchCount+=r.data.length;
             }
         });
         
-        const lastResult=results[results.length-1];
-        if(!gotAny||lastResult.data.length<limit){
+        if(showProgress&&status){
+            status.textContent=`加载中... ${result.length.toLocaleString()} 条`;
+        }
+        
+        // 检查是否还有更多数据
+        const lastBatchSize=results.reduce((max,r)=>Math.max(max,r.data.length),0);
+        if(!gotAny||lastBatchSize<limit){
             hasMore=false;
         }else{
             offset+=concurrent*limit;
@@ -1153,16 +1365,18 @@ function goPosPage(p){posPage=parseInt(p);renderPositions();}
 async function loadAllTrades(){
     const tb=document.getElementById('txBody');
     const status=document.getElementById('txLoadStatus');
+    tb.innerHTML='<tr><td colspan="7" class="loading"><div class="loading-spinner"></div>加载全部交易记录...</td></tr>';
     status.textContent='加载中...';
     
     try{
-        allTrades=await fetchAllTradesData(wallet);
+        allTrades=await fetchAllTradesData(wallet,true); // 显示进度
         
         if(allTrades.length){
             processTradeStats();
             txPage=1;
             renderTrades();
-            status.textContent=`共 ${allTrades.length.toLocaleString()} 条`;
+            document.getElementById('txTitle').textContent=`📜 交易历史 (${allTrades.length.toLocaleString()}条)`;
+            status.textContent=`共 ${allTrades.length.toLocaleString()} 条 (全部)`;
             // 保存缓存
             saveAccountCache(wallet);
         }else{
