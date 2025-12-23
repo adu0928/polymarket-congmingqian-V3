@@ -152,6 +152,7 @@
         
         /* Whale styles */
         .whale-section { margin-bottom: 24px; }
+        .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px; }
         .section-title { font-size: 16px; font-weight: 600; margin-bottom: 14px; }
         .markets-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
         .market-card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 10px; padding: 16px; cursor: pointer; transition: all 0.2s; }
@@ -184,7 +185,7 @@
     <div class="progress-overlay" id="loadingOverlay">
         <div class="progress-box">
             <div class="progress-title">🚀 正在加载排行榜数据</div>
-            <div class="progress-count" id="loadCount">0 / 5000</div>
+            <div class="progress-count" id="loadCount">加载中...</div>
             <div class="progress-bar"><div class="progress-fill" id="loadProgress" style="width:0%"></div></div>
             <div class="progress-text" id="loadText">正在连接API...</div>
         </div>
@@ -256,7 +257,7 @@
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
                             <input type="text" id="tableSearch" placeholder="搜索钱包地址..." oninput="filterTable()">
                         </div>
-                        <span class="data-info" id="dataInfo">5000条数据</span>
+                        <span class="data-info" id="dataInfo">加载中...</span>
                         <button class="action-btn" onclick="exportCSV()">📥 导出</button>
                         <button class="action-btn" id="refreshBtn" onclick="refreshData()">🔄 刷新</button>
                     </div>
@@ -295,21 +296,46 @@
         
         <!-- Panel 2: Whale -->
         <section class="panel" id="whale">
-            <div class="filter-bar">
-                <div class="filter-group"><span class="filter-label">金额:</span>
-                    <button class="filter-chip amt-chip" data-min="1000">$1K+</button>
-                    <button class="filter-chip amt-chip active" data-min="5000">$5K+</button>
-                    <button class="filter-chip amt-chip" data-min="10000">$10K+</button>
-                    <button class="filter-chip amt-chip" data-min="50000">$50K+</button>
+            <!-- 热门市场部分 -->
+            <div class="whale-section">
+                <div class="section-header">
+                    <h2 class="section-title">🔥 热门市场</h2>
+                    <div class="filter-group">
+                        <span class="filter-label">排序:</span>
+                        <button class="filter-chip market-sort active" data-sort="volume24hr">交易额</button>
+                        <button class="filter-chip market-sort" data-sort="liquidity">流动性</button>
+                    </div>
                 </div>
-                <button class="action-btn" onclick="loadWhaleData()">🔄 刷新</button>
+                <div class="markets-grid" id="marketsGrid"><div class="loading"><div class="loading-spinner"></div>加载中...</div></div>
             </div>
-            <div class="whale-section"><h2 class="section-title">🔥 热门市场</h2><div class="markets-grid" id="marketsGrid"><div class="loading"><div class="loading-spinner"></div>加载中...</div></div></div>
-            <div class="whale-section"><h2 class="section-title">🐋 大额交易</h2><div class="whale-list" id="whaleList"><div class="loading"><div class="loading-spinner"></div>加载中...</div></div></div>
+            
+            <!-- 大额交易部分 -->
+            <div class="whale-section">
+                <div class="section-header">
+                    <h2 class="section-title">🐋 大额交易 <span id="whaleCount" style="font-size:14px;color:var(--text-muted);font-weight:normal;">(加载中...)</span></h2>
+                    <button class="action-btn" onclick="loadWhaleTrades()">🔄 刷新</button>
+                </div>
+                <div class="filter-bar" style="margin-bottom:12px;">
+                    <div class="filter-group"><span class="filter-label">最小金额:</span>
+                        <button class="filter-chip amt-chip" data-min="5000">$5K</button>
+                        <button class="filter-chip amt-chip active" data-min="10000">$10K</button>
+                        <button class="filter-chip amt-chip" data-min="30000">$30K</button>
+                        <button class="filter-chip amt-chip" data-min="50000">$50K</button>
+                        <button class="filter-chip amt-chip" data-min="80000">$80K</button>
+                        <button class="filter-chip amt-chip" data-min="100000">$100K</button>
+                        <button class="filter-chip amt-chip" data-min="150000">$150K</button>
+                        <input type="number" id="customMinAmt" placeholder="自定义金额" style="width:100px;padding:6px 10px;background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:6px;color:var(--text-primary);font-size:12px;" onchange="setCustomMinAmt(this.value)">
+                    </div>
+                </div>
+                <div class="whale-list" id="whaleList"><div class="loading"><div class="loading-spinner"></div>加载中...</div></div>
+            </div>
+            
+            <!-- 统计数据 -->
             <div class="stats-grid">
                 <div class="stat-card"><div class="stat-label">热门市场</div><div class="stat-value" id="whaleMktCount">-</div></div>
                 <div class="stat-card"><div class="stat-label">24h交易量</div><div class="stat-value col-volume" id="whale24hVol">-</div></div>
                 <div class="stat-card"><div class="stat-label">总流动性</div><div class="stat-value" id="whaleLiq">-</div></div>
+                <div class="stat-card"><div class="stat-label">大额交易数</div><div class="stat-value col-pnl-pos" id="whaleTradeCount">-</div></div>
             </div>
         </section>
         
@@ -373,7 +399,7 @@
 const DATA_API='https://data-api.polymarket.com',GAMMA_API='https://gamma-api.polymarket.com';
 const MAX_DATA=5000,PAGE_SIZE=100,TOTAL_PAGES=50,REFRESH_INTERVAL=10*60*1000; // 10分钟
 
-let category='OVERALL',timePeriod='ALL',orderBy='PNL',page=1,wallet='',minAmt=5000;
+let category='OVERALL',timePeriod='ALL',orderBy='PNL',page=1,wallet='',minAmt=10000;
 let allData=[],filteredData=[];
 let currentSortKey='rank',currentSortAsc=true;
 let allPositions=[],allTrades=[],posPage=1,txPage=1,itemsPerPage=100,globalPnl=0;
@@ -383,7 +409,7 @@ const catMap={'OVERALL':{zh:'全部',en:'All'},'POLITICS':{zh:'政治',en:'Polit
 const timeMap={'DAY':'今天','WEEK':'周度','MONTH':'月度','ALL':'全部'};
 
 // 缓存相关 - 简化为单一缓存
-const CACHE_KEY='polymarket_cache_v4'; // 更新版本号强制重新加载
+const CACHE_KEY='polymarket_cache_v6'; // 更新版本号
 const CACHE_EXPIRE=10*60*1000; // 10分钟过期
 
 function getCache(){
@@ -707,7 +733,10 @@ function initFilters(){
         }
         applyFiltersAndSort();
     }));
-    document.querySelectorAll('.amt-chip').forEach(c=>c.addEventListener('click',()=>{document.querySelectorAll('.amt-chip').forEach(x=>x.classList.remove('active'));c.classList.add('active');minAmt=parseInt(c.dataset.min);loadWhaleData();}));
+    document.querySelectorAll('.amt-chip').forEach(c=>c.addEventListener('click',()=>{document.querySelectorAll('.amt-chip').forEach(x=>x.classList.remove('active'));c.classList.add('active');minAmt=parseInt(c.dataset.min);document.getElementById('customMinAmt').value='';loadWhaleTrades();}));
+    
+    // 市场排序筛选
+    document.querySelectorAll('.market-sort').forEach(c=>c.addEventListener('click',()=>{document.querySelectorAll('.market-sort').forEach(x=>x.classList.remove('active'));c.classList.add('active');marketSortBy=c.dataset.sort;loadMarkets();}));
 }
 
 // 加载全部5000条数据 - 高速并发版
@@ -730,7 +759,8 @@ async function loadAllLeaderboardData(){
         // 阶段1: 加载排行榜基础数据
         document.getElementById('loadText').textContent='阶段1/2: 加载排行榜...';
         
-        for(let i=0;i<batches.length;i+=concurrent){
+        let noMoreData=false;
+        for(let i=0;i<batches.length&&!noMoreData;i+=concurrent){
             const batch=batches.slice(i,i+concurrent);
             const promises=batch.map(offset=>{
                 const url=`${DATA_API}/v1/leaderboard?category=OVERALL&timePeriod=ALL&orderBy=PNL&limit=${limit}&offset=${offset}`;
@@ -738,19 +768,29 @@ async function loadAllLeaderboardData(){
             });
             
             const results=await Promise.all(promises);
+            let gotData=false;
             results.forEach(r=>{
                 if(r.data&&r.data.length){
                     allData=allData.concat(enrichData(r.data,r.offset));
+                    gotData=true;
                 }
             });
             
+            // 如果这一批没有数据，停止加载
+            if(!gotData){
+                noMoreData=true;
+            }
+            
             completed+=batch.length;
-            const loaded=Math.min(completed*limit,MAX_DATA);
             document.getElementById('loadProgress').style.width=(completed/totalBatches*50)+'%';
-            document.getElementById('loadCount').textContent=`${loaded} / ${MAX_DATA}`;
+            document.getElementById('loadCount').textContent=`排行榜 ${allData.length} 条`;
         }
         
         allData.sort((a,b)=>a.rank-b.rank);
+        
+        // 更新实际加载条数
+        const actualCount=allData.length;
+        document.getElementById('loadCount').textContent=`${actualCount} 条`;
         
         // 阶段2: 加载所有用户详细数据
         document.getElementById('loadText').textContent='阶段2/2: 加载用户详情...';
@@ -812,10 +852,18 @@ async function loadAllUserDetails(){
         document.getElementById('loadProgress').style.width=pct+'%';
         document.getElementById('loadCount').textContent=`详情 ${loaded} / ${total}`;
         
+        // 每加载100个，刷新一次显示
+        if(loaded%100===0){
+            renderLeaderboard();
+        }
+        
         if(i+batchSize<allData.length){
             await new Promise(r=>setTimeout(r,50));
         }
     }
+    
+    // 最终刷新显示
+    renderLeaderboard();
     
     // 详情加载完成后，启动后台USDC余额加载
     loadAllUSDCBalancesInBackground();
@@ -909,25 +957,21 @@ function enrichData(data,offset){
         const vol=parseFloat(t.vol||0);
         const rank=parseInt(t.rank)||offset+i+1;
         
-        // 估算交易次数：成交量 / 平均每笔交易金额(假设$500)
-        const estimatedTrades=Math.max(1,Math.round(vol/500));
-        
-        // 平均盈利 = 总盈利 / 估算交易次数
-        const avgprofit=estimatedTrades>0?pnl/estimatedTrades:0;
-        
-        // 其他数据需要详细查询才能获取
+        // 这些数据需要详情加载后才能获取真实值
+        const trades=null; // 详情加载后更新
         const days=null;
         const invested=null;
         const roi=null;
         const winrate=null;
         const balance=null;
         const positions=null;
-        const avgbet=vol>0?vol/estimatedTrades:null;
+        const avgbet=null;
+        const avgprofit=null; // 详情加载后更新
         const daily=null;
         const catKey=catKeys[Math.floor(Math.random()*catKeys.length)];
         const lastTime=Date.now()-Math.random()*30*86400000;
         
-        return{...t,rank,pnl,vol,trades:estimatedTrades,days,invested,roi,winrate,balance,positions,avgbet,avgprofit,daily,catKey,lastTime};
+        return{...t,rank,pnl,vol,trades,days,invested,roi,winrate,balance,positions,avgbet,avgprofit,daily,catKey,lastTime};
     });
 }
 
@@ -1299,9 +1343,143 @@ function exportCSV(){
 function downloadCSV(csv,filename){const blob=new Blob(['\﻿'+csv],{type:'text/csv;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=filename;a.click();}
 
 // Whale section
-async function loadWhaleData(){await Promise.all([loadMarkets(),loadWhaleTrades()]);}
-async function loadMarkets(){const c=document.getElementById('marketsGrid');c.innerHTML='<div class="loading"><div class="loading-spinner"></div>加载中...</div>';try{const data=await api(`${GAMMA_API}/markets?closed=false&limit=8&order=volume24hr&ascending=false`);let vol24=0,liq=0;data.forEach(m=>{vol24+=parseFloat(m.volume24hr||0);liq+=parseFloat(m.liquidity||0);});document.getElementById('whaleMktCount').textContent=data.length;document.getElementById('whale24hVol').textContent=fmt$(vol24);document.getElementById('whaleLiq').textContent=fmt$(liq);c.innerHTML=data.map(m=>{const p=m.outcomePrices?JSON.parse(m.outcomePrices):[0.5,0.5];const yes=parseFloat(p[0]||0.5),no=parseFloat(p[1]||0.5);const slug=m.groupItemSlug||m.slug||m.conditionId;return`<div class="market-card" onclick="window.open('https://polymarket.com/event/${slug}','_blank')"><div class="market-name">${m.question||'Unknown'}</div><div class="market-odds"><div class="odds-box"><div class="odds-label">YES</div><div class="odds-value odds-yes">${(yes*100).toFixed(1)}¢</div></div><div class="odds-box"><div class="odds-label">NO</div><div class="odds-value odds-no">${(no*100).toFixed(1)}¢</div></div></div><div class="market-meta"><span>24h: ${fmt$(parseFloat(m.volume24hr||0))}</span><span>流动性: ${fmt$(parseFloat(m.liquidity||0))}</span></div></div>`;}).join('');}catch(e){c.innerHTML=`<div class="error-msg">${e.message}</div>`;}}
-async function loadWhaleTrades(){const c=document.getElementById('whaleList');try{const traders=allData.slice(0,10);const markets=await api(`${GAMMA_API}/markets?closed=false&limit=10&order=volume24hr&ascending=false`);const trades=traders.map((t,i)=>{const m=markets[i%markets.length];const buy=Math.random()>0.4;const p=m?.outcomePrices?JSON.parse(m.outcomePrices):[0.5];const price=parseFloat(p[0]||0.5);const amt=Math.min(parseFloat(t.vol||10000)*0.1,100000);return{wallet:t.proxyWallet,market:m?.question||'Unknown',side:buy?'YES':'NO',buy,price,amt,time:Math.floor(Math.random()*120)+1};}).filter(t=>t.amt>=minAmt);if(!trades.length){c.innerHTML='<div class="no-results">无符合条件的交易</div>';return;}c.innerHTML=trades.map(t=>`<div class="whale-item"><div class="whale-icon ${t.buy?'buy':'sell'}">${t.buy?'🟢':'🔴'}</div><div class="whale-info"><div class="whale-market">${t.market.substring(0,50)}${t.market.length>50?'...':''}</div><div class="whale-details"><a href="javascript:void(0)" onclick="loadAccount('${t.wallet}')" class="wallet-link">${trunc(t.wallet)}</a> • ${t.buy?'买入':'卖出'} ${t.side} @ ${(t.price*100).toFixed(1)}¢</div></div><div class="whale-amount"><div class="whale-value ${t.buy?'col-pnl-pos':'col-pnl-neg'}">${fmt$(t.amt)}</div><div class="whale-time">${t.time}分钟前</div></div></div>`).join('');}catch(e){c.innerHTML=`<div class="error-msg">${e.message}</div>`;}}
+let marketSortBy='volume24hr'; // 市场排序字段
+
+async function loadWhaleData(){
+    await Promise.all([loadMarkets(),loadWhaleTrades()]);
+}
+
+// 设置自定义最小金额
+function setCustomMinAmt(val){
+    const amt=parseInt(val);
+    if(amt>0){
+        minAmt=amt;
+        document.querySelectorAll('.amt-chip').forEach(x=>x.classList.remove('active'));
+        loadWhaleTrades();
+    }
+}
+
+// 加载热门市场（20个）
+async function loadMarkets(){
+    const c=document.getElementById('marketsGrid');
+    c.innerHTML='<div class="loading"><div class="loading-spinner"></div>加载中...</div>';
+    
+    try{
+        const data=await api(`${GAMMA_API}/markets?closed=false&limit=20&order=${marketSortBy}&ascending=false`);
+        
+        let vol24=0,liq=0;
+        data.forEach(m=>{
+            vol24+=parseFloat(m.volume24hr||0);
+            liq+=parseFloat(m.liquidity||0);
+        });
+        
+        document.getElementById('whaleMktCount').textContent=data.length;
+        document.getElementById('whale24hVol').textContent=fmt$(vol24);
+        document.getElementById('whaleLiq').textContent=fmt$(liq);
+        
+        c.innerHTML=data.map(m=>{
+            const p=m.outcomePrices?JSON.parse(m.outcomePrices):[0.5,0.5];
+            const yes=parseFloat(p[0]||0.5),no=parseFloat(p[1]||0.5);
+            const slug=m.groupItemSlug||m.slug||m.conditionId;
+            return`<div class="market-card" onclick="window.open('https://polymarket.com/event/${slug}','_blank')">
+                <div class="market-name">${m.question||'Unknown'}</div>
+                <div class="market-odds">
+                    <div class="odds-box"><div class="odds-label">YES</div><div class="odds-value odds-yes">${(yes*100).toFixed(1)}¢</div></div>
+                    <div class="odds-box"><div class="odds-label">NO</div><div class="odds-value odds-no">${(no*100).toFixed(1)}¢</div></div>
+                </div>
+                <div class="market-meta">
+                    <span>24h: ${fmt$(parseFloat(m.volume24hr||0))}</span>
+                    <span>流动性: ${fmt$(parseFloat(m.liquidity||0))}</span>
+                </div>
+            </div>`;
+        }).join('');
+    }catch(e){
+        c.innerHTML=`<div class="error-msg">${e.message}</div>`;
+    }
+}
+
+// 加载大额交易（实时数据，50条）
+async function loadWhaleTrades(){
+    const c=document.getElementById('whaleList');
+    c.innerHTML='<div class="loading"><div class="loading-spinner"></div>加载实时交易数据...</div>';
+    document.getElementById('whaleCount').textContent='(加载中...)';
+    
+    try{
+        // 从排行榜前100名用户获取最近交易
+        const topTraders=allData.slice(0,100);
+        const allTrades=[];
+        
+        // 并发获取交易数据
+        const batchSize=10;
+        for(let i=0;i<Math.min(topTraders.length,50);i+=batchSize){
+            const batch=topTraders.slice(i,i+batchSize);
+            const results=await Promise.all(
+                batch.map(t=>
+                    api(`${DATA_API}/activity?user=${t.proxyWallet}&limit=20`)
+                        .then(data=>({wallet:t.proxyWallet,trades:data||[]}))
+                        .catch(()=>({wallet:t.proxyWallet,trades:[]}))
+                )
+            );
+            
+            results.forEach(r=>{
+                r.trades.forEach(trade=>{
+                    const amt=parseFloat(trade.usdcSize||trade.amount||0);
+                    if(amt>=minAmt){
+                        allTrades.push({
+                            wallet:r.wallet,
+                            market:trade.title||trade.market||'Unknown',
+                            side:(trade.side||'BUY').toUpperCase(),
+                            buy:(trade.side||'BUY').toUpperCase()==='BUY',
+                            price:parseFloat(trade.price||0),
+                            amt,
+                            timestamp:trade.timestamp||trade.createdAt,
+                            type:trade.type||'TRADE'
+                        });
+                    }
+                });
+            });
+        }
+        
+        // 按时间排序，取最新50条
+        allTrades.sort((a,b)=>{
+            const ta=parseTimestamp(a.timestamp)||new Date(0);
+            const tb=parseTimestamp(b.timestamp)||new Date(0);
+            return tb.getTime()-ta.getTime();
+        });
+        
+        const recentTrades=allTrades.slice(0,50);
+        
+        document.getElementById('whaleCount').textContent=`(${recentTrades.length}条)`;
+        document.getElementById('whaleTradeCount').textContent=recentTrades.length;
+        
+        if(!recentTrades.length){
+            c.innerHTML=`<div class="no-results">无符合条件的大额交易（最小金额: ${fmt$(minAmt)}）</div>`;
+            return;
+        }
+        
+        c.innerHTML=recentTrades.map(t=>{
+            const timeStr=timeAgo(t.timestamp);
+            return`<div class="whale-item">
+                <div class="whale-icon ${t.buy?'buy':'sell'}">${t.buy?'🟢':'🔴'}</div>
+                <div class="whale-info">
+                    <div class="whale-market">${t.market.substring(0,60)}${t.market.length>60?'...':''}</div>
+                    <div class="whale-details">
+                        <a href="javascript:void(0)" onclick="loadAccount('${t.wallet}')" class="wallet-link">${trunc(t.wallet)}</a> • 
+                        ${t.buy?'买入':'卖出'} ${t.side} @ ${t.price>0?(t.price*100).toFixed(1)+'¢':'-'}
+                    </div>
+                </div>
+                <div class="whale-amount">
+                    <div class="whale-value ${t.buy?'col-pnl-pos':'col-pnl-neg'}">${fmt$(t.amt)}</div>
+                    <div class="whale-time">${timeStr}</div>
+                </div>
+            </div>`;
+        }).join('');
+        
+    }catch(e){
+        c.innerHTML=`<div class="error-msg">${e.message}</div>`;
+        document.getElementById('whaleCount').textContent='(加载失败)';
+    }
+}
 
 // Account section
 // 账户数据缓存
