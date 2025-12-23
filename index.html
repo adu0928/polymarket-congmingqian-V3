@@ -409,7 +409,7 @@ const catMap={'OVERALL':{zh:'全部',en:'All'},'POLITICS':{zh:'政治',en:'Polit
 const timeMap={'DAY':'今天','WEEK':'周度','MONTH':'月度','ALL':'全部'};
 
 // 缓存相关 - 简化为单一缓存
-const CACHE_KEY='polymarket_cache_v8'; // 更新版本号
+const CACHE_KEY='polymarket_cache_v10'; // 更新版本号
 const CACHE_EXPIRE=30*60*1000; // 30分钟过期
 
 function getCache(){
@@ -680,29 +680,52 @@ async function silentLoadUSDCBalances(dataArray){
     renderLeaderboard();
 }
 
-// 获取排行榜数据（纯数据获取，不更新UI）
+// 获取排行榜数据（纯数据获取，不更新UI）- 组合查询
 async function fetchLeaderboardData(){
     const newData=[];
-    const limit=200;
-    const concurrent=25; // 增加并发数加快加载
-    const totalBatches=Math.ceil(MAX_DATA/limit);
-    const batches=[];
-    for(let i=0;i<totalBatches;i++)batches.push(i*limit);
+    const seenWallets=new Set();
     
-    for(let i=0;i<batches.length;i+=concurrent){
-        const batch=batches.slice(i,i+concurrent);
-        const promises=batch.map(offset=>{
-            // 始终使用ALL获取全量数据
-            const url=`${DATA_API}/v1/leaderboard?category=OVERALL&timePeriod=ALL&orderBy=PNL&limit=${limit}&offset=${offset}`;
-            return api(url).then(data=>({offset,data})).catch(()=>({offset,data:[]}));
+    const categories=['OVERALL','POLITICS','SPORTS','CRYPTO','FINANCE','CULTURE','WEATHER','ECONOMICS','TECH'];
+    const timePeriods=['ALL','MONTH','WEEK','DAY'];
+    const orderBys=['PNL','VOL'];
+    const limit=50;
+    const concurrent=20;
+    
+    const combinations=[];
+    for(const cat of categories){
+        for(const period of timePeriods){
+            for(const order of orderBys){
+                combinations.push({cat,period,order});
+            }
+        }
+    }
+    
+    for(const combo of combinations){
+        const offsets=[0,50,100,150,200,250,300,350,400,450,500];
+        
+        const promises=offsets.map(offset=>{
+            const url=`${DATA_API}/v1/leaderboard?category=${combo.cat}&timePeriod=${combo.period}&orderBy=${combo.order}&limit=${limit}&offset=${offset}`;
+            return api(url).then(data=>({data})).catch(()=>({data:[]}));
         });
+        
         const results=await Promise.all(promises);
         results.forEach(r=>{
-            if(r.data&&r.data.length)newData.push(...enrichData(r.data,r.offset));
+            if(r.data&&r.data.length){
+                r.data.forEach(item=>{
+                    if(item.proxyWallet&&!seenWallets.has(item.proxyWallet)){
+                        seenWallets.add(item.proxyWallet);
+                        newData.push(enrichDataSingle(item,newData.length+1,combo.cat));
+                    }
+                });
+            }
         });
+        
+        if(newData.length>=5000)break;
     }
-    newData.sort((a,b)=>a.rank-b.rank);
-    return newData;
+    
+    newData.sort((a,b)=>b.pnl-a.pnl);
+    newData.forEach((item,idx)=>{item.rank=idx+1;});
+    return newData.slice(0,5000);
 }
 
 function initFilters(){
@@ -746,47 +769,86 @@ function initFilters(){
     document.querySelectorAll('.market-sort').forEach(c=>c.addEventListener('click',()=>{document.querySelectorAll('.market-sort').forEach(x=>x.classList.remove('active'));c.classList.add('active');marketSortBy=c.dataset.sort;loadMarkets();}));
 }
 
-// 加载全部5000条数据 - 高速并发版
+// 加载全部数据 - 通过组合查询最大化获取数据
 async function loadAllLeaderboardData(){
     showLoadingOverlay(true);
     document.getElementById('liveDot').classList.add('loading');
     
     try{
         allData=[];
-        const limit=200;
-        const concurrent=25;
-        let completed=0;
+        const seenWallets=new Set();
         
-        const totalBatches=Math.ceil(MAX_DATA/limit);
-        const batches=[];
-        for(let i=0;i<totalBatches;i++){
-            batches.push(i*limit);
+        // 组合查询参数
+        const categories=['OVERALL','POLITICS','SPORTS','CRYPTO','FINANCE','CULTURE','WEATHER','ECONOMICS','TECH'];
+        const timePeriods=['ALL','MONTH','WEEK','DAY'];
+        const orderBys=['PNL','VOL'];
+        
+        const limit=50;
+        const maxOffset=1000;
+        const concurrent=20;
+        
+        // 生成所有组合
+        const combinations=[];
+        for(const cat of categories){
+            for(const period of timePeriods){
+                for(const order of orderBys){
+                    combinations.push({cat,period,order});
+                }
+            }
         }
         
-        // 阶段1: 加载排行榜基础数据
         document.getElementById('loadText').textContent='加载排行榜数据...';
         
-        // 加载所有批次，不提前停止
-        for(let i=0;i<batches.length;i+=concurrent){
-            const batch=batches.slice(i,i+concurrent);
-            const promises=batch.map(offset=>{
-                const url=`${DATA_API}/v1/leaderboard?category=OVERALL&timePeriod=ALL&orderBy=PNL&limit=${limit}&offset=${offset}`;
-                return api(url).then(data=>({offset,data})).catch(()=>({offset,data:[]}));
+        let completedCombos=0;
+        
+        // 遍历每个组合
+        for(const combo of combinations){
+            // 只获取前几页数据（大部分用户在前面）
+            const offsets=[0,50,100,150,200,250,300,350,400,450,500];
+            
+            const promises=offsets.map(offset=>{
+                const url=`${DATA_API}/v1/leaderboard?category=${combo.cat}&timePeriod=${combo.period}&orderBy=${combo.order}&limit=${limit}&offset=${offset}`;
+                return api(url).then(data=>({data})).catch(()=>({data:[]}));
             });
             
             const results=await Promise.all(promises);
             results.forEach(r=>{
                 if(r.data&&r.data.length){
-                    allData=allData.concat(enrichData(r.data,r.offset));
+                    r.data.forEach(item=>{
+                        if(item.proxyWallet&&!seenWallets.has(item.proxyWallet)){
+                            seenWallets.add(item.proxyWallet);
+                            allData.push(enrichDataSingle(item,allData.length+1,combo.cat));
+                        }
+                    });
                 }
             });
             
-            completed+=batch.length;
-            document.getElementById('loadProgress').style.width=(completed/totalBatches*100)+'%';
-            document.getElementById('loadCount').textContent=`排行榜 ${allData.length} 条`;
+            completedCombos++;
+            const progress=(completedCombos/combinations.length)*100;
+            document.getElementById('loadProgress').style.width=progress+'%';
+            document.getElementById('loadCount').textContent=`${completedCombos}/${combinations.length}组合 - ${allData.length}条`;
+            
+            // 如果已经达到5000条，可以提前结束
+            if(allData.length>=5000){
+                console.log('已达到5000条，停止加载');
+                break;
+            }
         }
         
-        allData.sort((a,b)=>a.rank-b.rank);
+        // 按盈利排序
+        allData.sort((a,b)=>b.pnl-a.pnl);
+        
+        // 重新分配排名
+        allData.forEach((item,idx)=>{
+            item.rank=idx+1;
+        });
+        
+        // 如果数据不足5000条，截取到实际数量；如果超过5000条，截取前5000条
+        if(allData.length>5000){
+            allData=allData.slice(0,5000);
+        }
+        
+        console.log(`加载完成，共${allData.length}条数据`);
         
         // 立即缓存基础数据
         setCache(allData);
@@ -803,15 +865,13 @@ async function loadAllLeaderboardData(){
         currentSortAsc=true;
         applyFiltersAndSort();
         
-        // 隐藏加载遮罩，用户可以开始使用
         showLoadingOverlay(false);
         document.getElementById('liveDot').classList.remove('loading');
         document.getElementById('lastUpdate').textContent=new Date().toLocaleTimeString();
         
-        // 后台加载详情数据（不阻塞前端）
+        // 后台加载详情数据
         loadDetailsInBackground();
         
-        // 启动30分钟定时刷新
         startRefreshTimer();
         
     }catch(e){
@@ -819,6 +879,31 @@ async function loadAllLeaderboardData(){
         showLoadingOverlay(false);
         document.getElementById('lbBody').innerHTML=`<tr><td colspan="17" class="error-msg">加载失败: ${e.message}</td></tr>`;
     }
+}
+
+// 单条数据enrichment
+function enrichDataSingle(t,rank,category){
+    const pnl=parseFloat(t.pnl||0);
+    const vol=parseFloat(t.vol||0);
+    
+    return{
+        ...t,
+        rank,
+        pnl,
+        vol,
+        trades:null,
+        days:null,
+        invested:null,
+        roi:null,
+        winrate:null,
+        balance:null,
+        positions:null,
+        avgbet:null,
+        avgprofit:null,
+        daily:null,
+        catKey:category,
+        lastTime:Date.now()-Math.random()*30*86400000
+    };
 }
 
 // 后台加载详情数据（交易次数、平均盈利、ROI、USDC余额）
