@@ -409,7 +409,7 @@ const catMap={'OVERALL':{zh:'全部',en:'All'},'POLITICS':{zh:'政治',en:'Polit
 const timeMap={'DAY':'今天','WEEK':'周度','MONTH':'月度','ALL':'全部'};
 
 // 缓存相关 - 简化为单一缓存
-const CACHE_KEY='polymarket_cache_v7'; // 更新版本号
+const CACHE_KEY='polymarket_cache_v8'; // 更新版本号
 const CACHE_EXPIRE=30*60*1000; // 30分钟过期
 
 function getCache(){
@@ -766,8 +766,8 @@ async function loadAllLeaderboardData(){
         // 阶段1: 加载排行榜基础数据
         document.getElementById('loadText').textContent='加载排行榜数据...';
         
-        let noMoreData=false;
-        for(let i=0;i<batches.length&&!noMoreData;i+=concurrent){
+        // 加载所有批次，不提前停止
+        for(let i=0;i<batches.length;i+=concurrent){
             const batch=batches.slice(i,i+concurrent);
             const promises=batch.map(offset=>{
                 const url=`${DATA_API}/v1/leaderboard?category=OVERALL&timePeriod=ALL&orderBy=PNL&limit=${limit}&offset=${offset}`;
@@ -775,17 +775,11 @@ async function loadAllLeaderboardData(){
             });
             
             const results=await Promise.all(promises);
-            let gotData=false;
             results.forEach(r=>{
                 if(r.data&&r.data.length){
                     allData=allData.concat(enrichData(r.data,r.offset));
-                    gotData=true;
                 }
             });
-            
-            if(!gotData){
-                noMoreData=true;
-            }
             
             completed+=batch.length;
             document.getElementById('loadProgress').style.width=(completed/totalBatches*100)+'%';
