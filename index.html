@@ -352,9 +352,9 @@
                 </div>
                 <div class="stats-row">
                     <div class="stat-item"><div class="stat-item-label">USDC余额</div><div class="stat-item-value col-balance" id="r1Balance">-</div></div>
+                    <div class="stat-item"><div class="stat-item-label">Portfolio价值</div><div class="stat-item-value" id="r1Portfolio">-</div></div>
                     <div class="stat-item"><div class="stat-item-label">盈利/亏损</div><div class="stat-item-value col-pnl-pos" id="r1Pnl">-</div></div>
                     <div class="stat-item"><div class="stat-item-label">ROI</div><div class="stat-item-value col-roi" id="r1Roi">-</div></div>
-                    <div class="stat-item"><div class="stat-item-label">Portfolio价值</div><div class="stat-item-value" id="r1Portfolio">-</div></div>
                     <div class="stat-item"><div class="stat-item-label">平均投注</div><div class="stat-item-value col-avgbet" id="r1AvgBet">-</div></div>
                     <div class="stat-item"><div class="stat-item-label">平均盈利</div><div class="stat-item-value col-avgprofit" id="r1AvgProfit">-</div></div>
                     <div class="stat-item"><div class="stat-item-label">投入金额</div><div class="stat-item-value col-invested" id="r1Invested">-</div></div>
@@ -1451,13 +1451,13 @@ function setCustomMinAmt(val){
     }
 }
 
-// 加载热门市场（20个）
+// 加载热门市场（24个）
 async function loadMarkets(){
     const c=document.getElementById('marketsGrid');
     c.innerHTML='<div class="loading"><div class="loading-spinner"></div>加载中...</div>';
     
     try{
-        const data=await api(`${GAMMA_API}/markets?closed=false&limit=20&order=${marketSortBy}&ascending=false`);
+        const data=await api(`${GAMMA_API}/markets?closed=false&limit=24&order=${marketSortBy}&ascending=false`);
         
         let vol24=0,liq=0;
         data.forEach(m=>{
